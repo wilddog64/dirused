@@ -62,7 +62,7 @@ public static class ScanRunner
                         errors.Add(new ScanError(target.Display, $"TIMED OUT after {FormatDuration(timeout!.Value)}"));
                         result = result with { Errors = errors, Complete = false };
                     }
-                    else if (ct.IsCancellationRequested && result.Complete)
+                    else if (ct.IsCancellationRequested && !result.Errors.Any(e => e.Reason == "CANCELLED"))
                     {
                         var errors = result.Errors.ToList();
                         errors.Add(new ScanError(target.Display, "CANCELLED"));

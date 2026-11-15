@@ -25,7 +25,7 @@ public sealed class SummaryRenderer : IRenderer
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in results)
         {
-            if (!r.Complete && r.Volume.TotalBytes == 0 && r.Errors.Count > 0)
+            if (!r.Complete)
             {
                 failed.Add(r);
                 continue;
