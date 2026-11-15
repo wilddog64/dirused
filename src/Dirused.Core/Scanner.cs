@@ -4,11 +4,6 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Dirused.Core;
 
-public record Entry(string Path, long LogicalBytes, long OnDiskBytes);
-public record ScanError(string Path, string Reason);
-public record Volume(string Drive, long UsedBytes, long FreeBytes, long TotalBytes, double PercentUsed);
-public record ScanResult(string Target, Volume Volume, List<Entry> Directories, List<Entry> Files, List<ScanError> Errors, bool Complete);
-
 public sealed class Scanner
 {
     private readonly HashSet<(uint, ulong)> seen = new();
@@ -22,11 +17,8 @@ public sealed class Scanner
         seen.Clear(); directories.Clear(); files.Clear(); errors.Clear();
         string full = Path.GetFullPath(target);
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
-        var drive = new DriveInfo(root);
-        long total = drive.TotalSize, free = drive.TotalFreeSpace;
-        var volume = new Volume(root, total - free, free, total, total == 0 ? 0 : 100.0 * (total - free) / total);
-        if (!GetDiskFreeSpace(root, out uint sectors, out uint bytes, out _, out _)) throw new Win32Exception(Marshal.GetLastWin32Error());
-        clusterSize = (long)sectors * bytes;
+        var volume = Volumes.VolumeProbe.Probe(root);
+        clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
         Walk(full);
         return new ScanResult(full, volume, directories.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), errors, errors.Count == 0);
@@ -75,7 +67,7 @@ public sealed class Scanner
     private long Allocated(string path)
     {
         Marshal.SetLastPInvokeError(0);
-        uint low = GetCompressedFileSize(path, out uint high);
+        uint low = Native.Kernel32.GetCompressedFileSize(path, out uint high);
         int error = Marshal.GetLastPInvokeError();
         if (low == uint.MaxValue && error != 0) throw new Win32Exception(error);
         long size = checked((long)(((ulong)high << 32) | low));
@@ -83,23 +75,9 @@ public sealed class Scanner
     }
     private bool Remember(string path)
     {
-        using SafeFileHandle handle = CreateFile(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+        using SafeFileHandle handle = Native.Kernel32.CreateFile(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
         if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (!GetFileInformationByHandle(handle, out var info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!Native.Kernel32.GetFileInformationByHandle(handle, out var info)) throw new Win32Exception(Marshal.GetLastWin32Error());
         return seen.Add((info.VolumeSerialNumber, ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow));
     }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileInformation
-    {
-        public uint FileAttributes; public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime, LastAccessTime, LastWriteTime;
-        public uint VolumeSerialNumber, FileSizeHigh, FileSizeLow, NumberOfLinks, FileIndexHigh, FileIndexLow;
-    }
-    [DllImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool GetDiskFreeSpace(string root, out uint sectors, out uint bytes, out uint free, out uint total);
-    [DllImport("kernel32.dll", EntryPoint = "GetCompressedFileSizeW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetCompressedFileSize(string path, out uint high);
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation info);
 }
