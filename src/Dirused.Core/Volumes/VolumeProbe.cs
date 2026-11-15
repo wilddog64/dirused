@@ -11,6 +11,7 @@ public static class VolumeProbe
 {
     public static Volume Probe(string root)
     {
+        if (!root.EndsWith('\\') && !root.EndsWith('/')) root += "\\";
         if (!Kernel32.GetDiskFreeSpaceEx(root, out _, out var total, out var free)) throw new VolumeProbeException(Marshal.GetLastWin32Error());
         if (!Kernel32.GetDiskFreeSpace(root, out var sectors, out var bytes, out _, out _)) throw new VolumeProbeException(Marshal.GetLastWin32Error());
         var fs = new StringBuilder(256);
