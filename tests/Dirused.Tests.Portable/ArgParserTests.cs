@@ -6,8 +6,11 @@ namespace Dirused.Tests.Portable;
 public class ArgParserTests
 {
     [Theory]
-    [InlineData("/file")][InlineData("/summary")][InlineData("/timeout")][InlineData("/parallel")]
-    public void Unavailable(string flag) => Assert.Equal("not available yet (M1b)", ArgParser.Parse(new[] { ".", flag }).Error);
+    [InlineData("/purge", "not available yet (M2)")]
+    [InlineData("/monitor", "not available yet (M3)")]
+    [InlineData("/threshold", "not available yet (M3)")]
+    [InlineData("/gui", "not available yet (GUI)")]
+    public void Unavailable(string flag, string expected) => Assert.Equal(expected, ArgParser.Parse(new[] { ".", flag }).Error);
     [Fact] public void UncPassesThroughParser()
     {
         const string target = @"\\localhost\c$";

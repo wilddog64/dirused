@@ -33,9 +33,17 @@ the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see t
     dirused /all
     dirused C:\path /json
     dirused C:\path /csv
+    dirused /file targets.txt /summary
+    dirused /file targets.txt /timeout 30s /parallel 4
     dirused --help
 
 A bare node scans its lettered administrative disk shares (such as `C$` and `D$`). Admin shares require administrator rights on the target; scans use the current Windows token. Relative paths resolve against the current directory.
+
+Sample `targets.txt`:
+
+    # Fleet targets (one per line, blank lines and # comments ignored)
+    C:\
+    \\server\share
 
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
 
