@@ -12,20 +12,22 @@ public static class ScanRunner
         var results = new TargetResult[targets.Count];
         int maxParallel = Math.Clamp(options.Parallel ?? 4, 1, 64);
         TimeSpan? timeout = options.Timeout is { } t && t > TimeSpan.Zero ? t : null;
-        using var semaphore = new SemaphoreSlim(maxParallel, maxParallel);
-        var tasks = new Task[targets.Count];
+        var workers = new Task[Math.Min(maxParallel, targets.Count)];
+        int nextIndex = -1;
 
-        for (int i = 0; i < targets.Count; i++)
+        for (int i = 0; i < workers.Length; i++)
         {
-            int idx = i;
-            var target = targets[idx];
-            tasks[idx] = Task.Run(async () =>
+            workers[i] = Task.Factory.StartNew(() =>
             {
-                bool acquired = false;
-                try
+                int idx;
+                while ((idx = Interlocked.Increment(ref nextIndex)) < targets.Count)
                 {
-                    await semaphore.WaitAsync(ct).ConfigureAwait(false);
-                    acquired = true;
+                    var target = targets[idx];
+                    if (ct.IsCancellationRequested)
+                    {
+                        results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
+                        continue;
+                    }
                     using var timeoutCts = timeout is { } d ? CancellationTokenSource.CreateLinkedTokenSource(ct) : null;
                     if (timeoutCts != null && timeout is { } dur) timeoutCts.CancelAfter(dur);
                     var scanCt = timeoutCts?.Token ?? ct;
@@ -41,17 +43,17 @@ public static class ScanRunner
                         timedOut = true;
                         result = Incomplete(target, $"TIMED OUT after {FormatDuration(timeout!.Value)}");
                         results[idx] = new TargetResult(target, result);
-                        return;
+                        continue;
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
                         results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
-                        return;
+                        continue;
                     }
                     catch (Exception ex)
                     {
                         results[idx] = new TargetResult(target, Incomplete(target, ex.Message));
-                        return;
+                        continue;
                     }
 
                     if (timedOut)
@@ -69,18 +71,10 @@ public static class ScanRunner
 
                     results[idx] = new TargetResult(target, result);
                 }
-                catch (OperationCanceledException)
-                {
-                    results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
-                }
-                finally
-                {
-                    if (acquired) semaphore.Release();
-                }
-            }, CancellationToken.None);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        Task.WaitAll(tasks);
+        Task.WaitAll(workers);
         return results;
     }
 
