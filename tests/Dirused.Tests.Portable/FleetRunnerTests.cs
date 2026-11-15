@@ -182,4 +182,47 @@ public sealed class FleetRunnerTests : IDisposable
         Assert.True(doc.RootElement.GetProperty("summary").GetBoolean());
         Assert.Equal(3, doc.RootElement.GetProperty("targets").GetArrayLength());
     }
+
+    [Fact]
+    public void CtrlCOnAnIncompleteScanStillReportsCancelled()
+    {
+        var target = TargetParser.Parse("C:\\walk")!;
+        using var cts = new CancellationTokenSource();
+        var results = ScanRunner.Run(
+            new[] { target },
+            (t, _) =>
+            {
+                cts.Cancel();
+                return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), false);
+            },
+            new RunOptions(Parallel: 1),
+            cts.Token);
+        Assert.False(results[0].Result.Complete);
+        Assert.Contains(results[0].Result.Errors, e => e.Reason == "CANCELLED");
+
+        // Positive control: no Ctrl+C, no CANCELLED.
+        var ok = ScanRunner.Run(
+            new[] { target },
+            (t, _) => new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true),
+            new RunOptions(Parallel: 1),
+            CancellationToken.None);
+        Assert.True(ok[0].Result.Complete);
+        Assert.Empty(ok[0].Result.Errors);
+    }
+
+    [Fact]
+    public void SummaryReportsIncompleteTargetWithVolumeAsFailure()
+    {
+        var timedOut = new ScanResult("E:\\slow", new Volume("E:\\", 400, 600, 1000, 40.0) { SerialNumber = 333 }, new(), new(), new() { new ScanError("E:\\slow", "TIMED OUT after 5s") }, false);
+        var sameVolume = new ScanResult("E:\\ok", new Volume("E:\\", 400, 600, 1000, 40.0) { SerialNumber = 333 }, new(), new(), new(), true);
+
+        using var textOut = new StringWriter();
+        new SummaryRenderer().Render(textOut, new[] { timedOut, sameVolume });
+        var lines = textOut.ToString().TrimEnd().Split(Environment.NewLine);
+        Assert.Contains("E:\\slow: TIMED OUT after 5s", lines);
+
+        // Positive control: the complete target on the same volume still prints its volume line.
+        Assert.Contains(lines, l => l.StartsWith("E:\\ used", StringComparison.Ordinal));
+        Assert.Equal(2, lines.Length);
+    }
 }
