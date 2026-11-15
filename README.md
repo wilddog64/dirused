@@ -19,15 +19,23 @@ PowerShell 7.6.10, ansible-core 2.22.0, pywinrm 0.5.0, ansible.windows 3.9.2, ch
 The VM is for running and looking at the tool. Builds and tests also run on the `windows-latest` CI runner, which is
 the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see the plan's CLI gate.
 
-## Usage (M1a)
+## Usage
 
     dirused .
     dirused C:\path /top 10
     dirused D:\
+    dirused D:
+    dirused d:/apps
+    dirused sub/dir
+    dirused \\server\share\path
+    dirused //server/share/path
+    dirused \\node
     dirused /all
     dirused C:\path /json
     dirused C:\path /csv
     dirused --help
+
+A bare node scans its lettered administrative disk shares (such as `C$` and `D$`). Admin shares require administrator rights on the target; scans use the current Windows token. Relative paths resolve against the current directory.
 
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
 
