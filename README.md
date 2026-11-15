@@ -30,3 +30,7 @@ the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see t
     dirused --help
 
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
