@@ -17,7 +17,9 @@ public static class Program
         {
             var resolved = TargetResolver.ResolveDetailed(options.Targets, nodeShares);
             var targets = resolved.Select(x => x.Target).ToList();
-            var results = ScanRunner.Run(targets, (target, _) => RemoteScan.Scan(resolved.First(x => ReferenceEquals(x.Target, target))), new RunOptions(options.Parallel, options.Timeout), CancellationToken.None)
+            var byTarget = new Dictionary<Dirused.Common.Targets.Target, ResolvedTarget>(ReferenceEqualityComparer.Instance);
+            foreach (var item in resolved) byTarget.TryAdd(item.Target, item);
+            var results = ScanRunner.Run(targets, (target, _) => RemoteScan.Scan(byTarget[target]), new RunOptions(options.Parallel, options.Timeout), CancellationToken.None)
                 .Select(x => x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() }).ToList();
             IRenderer renderer = options.Format switch { OutputFormat.Json => new JsonRenderer(), OutputFormat.Csv => new CsvRenderer(), _ => new TextRenderer() };
             if (options.Format == OutputFormat.Text)
