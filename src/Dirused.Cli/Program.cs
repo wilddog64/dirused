@@ -33,7 +33,7 @@ public static class Program
                 OutputFormat.Csv => new CsvRenderer(options.Summary),
                 _ => options.Summary ? new SummaryRenderer() : new TextRenderer()
             };
-            if (options.Format == OutputFormat.Text)
+            if (options.Format == OutputFormat.Text && !options.Summary)
             {
                 foreach (var result in results)
                     if (!result.Complete && result.Volume.TotalBytes == 0 && result.Errors.Count == 1) output.WriteLine(result.Errors[0].Reason);
