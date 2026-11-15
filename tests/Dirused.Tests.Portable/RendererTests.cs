@@ -50,6 +50,6 @@ public class RendererTests
   ]
 }
 """;
-        Assert.Equal(expected.Replace("\n", Environment.NewLine) + Environment.NewLine, w.ToString());
+        Assert.Equal(expected.ReplaceLineEndings(Environment.NewLine) + Environment.NewLine, w.ToString());
     }
 }
