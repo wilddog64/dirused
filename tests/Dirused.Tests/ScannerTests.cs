@@ -11,7 +11,12 @@ public sealed class ScannerTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "dirused-test-" + Guid.NewGuid().ToString("N"));
     public ScannerTests() => Directory.CreateDirectory(root);
-    public void Dispose() => Directory.Delete(root, true);
+    public void Dispose()
+    {
+        foreach (var dir in new DirectoryInfo(root).EnumerateDirectories("*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }).Where(d => d.Attributes.HasFlag(FileAttributes.ReparsePoint)).ToList())
+            dir.Delete();
+        Directory.Delete(root, true);
+    }
     private string PathIn(string name) => Path.Combine(root, name);
     private static void Command(string command, string arguments)
     {
