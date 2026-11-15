@@ -35,12 +35,6 @@ public class OutputCompatTests
         }
         finally { var junction = Path.Combine(root, "junction"); if (Directory.Exists(junction)) Directory.Delete(junction); Directory.Delete(root, true); }
     }
-    [Fact] public void UncIsRejectedByResolver()
-    {
-        using var output = new StringWriter(); using var error = new StringWriter();
-        Assert.Equal(1, Program.Run(new[] { @"\\localhost\c$" }, output, error));
-        Assert.Equal("UNC targets arrive in M1b" + Environment.NewLine, error.ToString());
-    }
     [Fact] public void VolumeProbeSupportsUncAndReportsErrors()
     {
         var local = VolumeProbe.Probe(@"C:\"); var unc = VolumeProbe.Probe(@"\\localhost\c$\");
