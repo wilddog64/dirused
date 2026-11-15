@@ -4,7 +4,7 @@ PY ?= python3
 export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
 export ANSIBLE_CONFIG := $(CURDIR)/ansible.cfg
 
-.PHONY: help venv collections vm-up vm-provision vm-check vm-halt vm-destroy
+.PHONY: help venv collections vm-up vm-provision vm-check vm-sync vm-build vm-test vm-halt vm-destroy
 
 help:
 	@echo "venv          create .venv with pinned ansible-core and pywinrm"
@@ -12,6 +12,9 @@ help:
 	@echo "vm-up         vagrant up the Windows dev VM (provisions on first boot)"
 	@echo "vm-provision  rerun the Ansible playbook"
 	@echo "vm-check      print OS, tool versions and volumes from the VM"
+	@echo "vm-sync       copy the working tree (tracked + untracked, not ignored) to C:\\src\\dirused"
+	@echo "vm-build      vm-sync, then dotnet build -c Release on the VM"
+	@echo "vm-test       vm-sync, then dotnet test -c Release on the VM"
 	@echo "vm-halt       stop the VM"
 	@echo "vm-destroy    delete the VM and its D: disk"
 
@@ -34,6 +37,18 @@ vm-provision: collections
 
 vm-check:
 	vagrant winrm -s powershell -c '$$env:Path=[Environment]::GetEnvironmentVariable("Path","Machine"); (Get-CimInstance Win32_OperatingSystem).Caption; $$env:PROCESSOR_ARCHITECTURE; dotnet --version; git --version; Get-Volume | Where-Object DriveLetter | Format-Table DriveLetter,FileSystem,Size -AutoSize'
+
+INVENTORY := .vagrant/provisioners/ansible/inventory/vagrant_ansible_inventory
+
+.vagrant/src.zip: FORCE
+	@rm -f $@
+	@git ls-files -z -co --exclude-standard | xargs -0 zip -q $@
+
+vm-sync vm-build vm-test: collections .vagrant/src.zip
+	@[ -f $(INVENTORY) ] || { echo "no Vagrant inventory: run make vm-up first" >&2; exit 2; }
+	$(VENV)/bin/ansible-playbook -i $(INVENTORY) ansible/build.yml -e dotnet_step=$(if $(filter vm-sync,$@),none,$(patsubst vm-%,%,$@))
+
+FORCE:
 
 vm-halt:
 	vagrant halt

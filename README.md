@@ -18,3 +18,19 @@ PowerShell 7.6.10, ansible-core 2.22.0, pywinrm 0.5.0, ansible.windows 3.9.2, ch
 
 The VM is for running and looking at the tool. Builds and tests also run on the `windows-latest` CI runner, which is
 the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see the plan's CLI gate.
+
+## Usage (M1a)
+
+    dirused .
+    dirused C:\path /top 10
+    dirused D:\
+    dirused /all
+    dirused C:\path /json
+    dirused C:\path /csv
+    dirused --help
+
+Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

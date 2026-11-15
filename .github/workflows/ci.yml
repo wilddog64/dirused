@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - run: dotnet test -c Release --no-build
+      - run: dotnet publish src/Dirused.Cli -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o out
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          & out\dirused.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & out\dirused.exe C:\Windows\Web /top 5
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) { exit $LASTEXITCODE }

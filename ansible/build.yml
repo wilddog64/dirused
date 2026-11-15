@@ -1,0 +1,48 @@
+---
+- name: Copy the working tree to the VM and build or test it there
+  hosts: all
+  gather_facts: false
+  vars:
+    src_zip: "{{ playbook_dir }}/../.vagrant/src.zip"
+    remote_zip: 'C:\src\dirused-src.zip'
+    remote_dir: 'C:\src\dirused'
+    dotnet_step: test
+
+  tasks:
+    - name: Upload the source archive
+      ansible.windows.win_copy:
+        src: "{{ src_zip }}"
+        dest: "{{ remote_zip }}"
+
+    - name: Replace C:\src\dirused with the uploaded tree
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path '{{ remote_dir }}') { Remove-Item -LiteralPath '{{ remote_dir }}' -Recurse -Force }
+          Expand-Archive -LiteralPath '{{ remote_zip }}' -DestinationPath '{{ remote_dir }}'
+          Remove-Item -LiteralPath '{{ remote_zip }}' -Force
+
+    - name: "dotnet {{ dotnet_step }} on the VM"
+      when: dotnet_step != 'none'
+      ansible.windows.win_powershell:
+        chdir: "{{ remote_dir }}"
+        script: |
+          $Ansible.Changed = $false
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+          $out = & dotnet {{ 'build -c Release' if dotnet_step == 'build' else 'test -c Release' }} 2>&1 | ForEach-Object { "$_" }
+          $rc = $LASTEXITCODE
+          [pscustomobject]@{ rc = $rc; lines = @($out | Select-Object -Last 40) }
+      register: dotnet_run
+
+    - name: Show dotnet output
+      when: dotnet_step != 'none'
+      ansible.builtin.debug:
+        var: dotnet_run.output[0].lines
+
+    - name: Fail when dotnet failed
+      when: dotnet_step != 'none'
+      ansible.builtin.assert:
+        that: dotnet_run.output[0].rc == 0
+        fail_msg: "dotnet {{ dotnet_step }} exited {{ dotnet_run.output[0].rc }}"
+        quiet: true
