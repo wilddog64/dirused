@@ -6,6 +6,14 @@ BOX_VERSION = "202511.21.0"
 VM_NAME = "dirused-dev"
 D_DRIVE_GB = 40
 
+VENV_BIN = File.join(__dir__, ".venv", "bin")
+ENV["PATH"] = "#{VENV_BIN}:#{ENV['PATH']}"
+ENV["ANSIBLE_CONFIG"] = File.join(__dir__, "ansible.cfg")
+if ARGV.any? { |a| %w[up provision reload].include?(a) } &&
+   !(File.executable?(File.join(VENV_BIN, "ansible-playbook")) && Dir.exist?(File.join(__dir__, "collections", "ansible_collections")))
+  abort "Ansible is not set up for this repo. Run: make venv collections (or make vm-up)"
+end
+
 Vagrant.configure("2") do |config|
   config.vm.box = BOX_NAME
   config.vm.box_version = BOX_VERSION
