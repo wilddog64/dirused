@@ -39,7 +39,7 @@ if (-not (Test-Path -LiteralPath $exe)) { "FAIL setup: $exe not found (run make 
 "exe: $exe  built: $((Get-Item -LiteralPath $exe).LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
 ""
 
-$codes = '(51|53|64|67|1231)'
+$codes = '(51|53|64|67|1231|1707)'
 
 $r = Invoke-Dirused @('\\nosuchhost-xyz\c$')
 Test-Check 'L1' 'unreachable share prints UNREACHABLE with a known code and exits 3' (($r.rc -eq 3) -and ($r.out -match "UNREACHABLE: \\\\nosuchhost-xyz\\c\$ \($codes\)")) $r
