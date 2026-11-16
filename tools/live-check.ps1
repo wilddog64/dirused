@@ -16,7 +16,7 @@ function Invoke-Dirused([string[]]$argList) {
     $out = & $exe @argList 2>&1 | ForEach-Object { "$_" }
     $rc = $LASTEXITCODE
     $sw.Stop()
-    [pscustomobject]@{ rc = $rc; out = ($out -join "`n"); seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1); cmd = "dirused " + ($argList -join ' ') }
+    [pscustomobject]@{ rc = $rc; out = ($out -join "`n"); seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1); cmd = "dirused " + (($argList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ') }
 }
 
 function Test-Check([string]$id, [string]$what, [bool]$ok, $r) {
@@ -58,8 +58,10 @@ Test-Check 'L3' "\\localhost /summary lists exactly the fixed drives ($($letters
 $volOk = $true
 if ($j) {
     foreach ($t in $j.targets) {
-        $letter = $t.target.Substring(12, 1)
-        $v = Get-Volume -DriveLetter $letter
+        if ("$($t.target)" -notmatch '^\\\\localhost\\([A-Za-z])\$\\$') { $volOk = $false; "    unexpected target: $($t.target)"; continue }
+        $letter = $Matches[1]
+        $v = Get-Volume -DriveLetter $letter -ErrorAction SilentlyContinue
+        if (-not $v) { $volOk = $false; "    no local volume for drive $letter"; continue }
         if ([int64]$t.volume.totalBytes -ne [int64]$v.Size -or [int64]$t.volume.freeBytes -ne [int64]$v.SizeRemaining) { $volOk = $false; "    drive $($letter): dirused total=$($t.volume.totalBytes) free=$($t.volume.freeBytes)  Get-Volume total=$($v.Size) free=$($v.SizeRemaining)" }
     }
 } else { $volOk = $false }

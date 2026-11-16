@@ -53,7 +53,7 @@ LIVE_EVIDENCE := .vagrant/live-evidence.md
 
 vm-live: vm-build
 	@set -o pipefail; \
-	sha="$$(git rev-parse --short HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
+	sha="$$(git rev-parse --short HEAD)$$([ -z "$$(git status --porcelain)" ] || echo -dirty)"; \
 	vagrant winrm -s powershell -c '& C:\src\dirused\tools\live-check.ps1; exit $$LASTEXITCODE' | tee .vagrant/live-body.txt; rc=$$?; \
 	{ echo "artifact: dirused.exe built by make vm-build at $$sha"; \
 	  echo "environment: dirused-dev Vagrant VM ($$(vagrant status --machine-readable 2>/dev/null | awk -F, '$$3=="provider-name"{print $$4}')), $$(date -u +%Y-%m-%d)"; \
