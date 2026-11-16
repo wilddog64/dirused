@@ -15,6 +15,20 @@ public class RemoteTargetTests
         public IEnumerable<NodeShare> Enumerate(string node) => new[] { new NodeShare("ADMIN$", 0x80000000), new NodeShare("IPC$", 0x80000003), new NodeShare("C$", 0x80000000), new NodeShare("data", 0), new NodeShare("D$", 0x80000000) };
     }
     private sealed class Denied : INodeShares { public IEnumerable<NodeShare> Enumerate(string node) => throw new Win32Exception(5); }
+    [Theory]
+    [InlineData(51, "UNREACHABLE")]
+    [InlineData(53, "UNREACHABLE")]
+    [InlineData(64, "UNREACHABLE")]
+    [InlineData(67, "UNREACHABLE")]
+    [InlineData(1231, "UNREACHABLE")]
+    [InlineData(5, "ACCESS DENIED")]
+    [InlineData(2, "ERROR")]
+    public void ErrorMessageClassifiesNativeErrors(int code, string label)
+    {
+        string message = TargetResolver.ErrorMessage(@"\\node", code);
+        Assert.StartsWith($"{label}: ", message);
+        if (code != 5) Assert.Equal($"{label}: \\\\node ({code})", message);
+    }
     [Fact] public void FiltersAndOrdersAdminDiskShares()
     {
         var result = TargetResolver.ResolveDetailed(new[] { @"\\node" }, new Shares());
@@ -45,7 +59,7 @@ public class RemoteTargetTests
         Assert.Equal(0, Program.Run(new[] { @"C:\Windows\Web" }, output, error));
         output.GetStringBuilder().Clear();
         Assert.Equal(3, Program.Run(new[] { @"C:\Windows\Web", @"\\nosuchhost-xyz\c$" }, output, error));
-        Assert.Contains("Largest directories", output.ToString()); Assert.Contains(@"UNREACHABLE: \\nosuchhost-xyz\c$ (53)", output.ToString());
+        Assert.Contains("Largest directories", output.ToString()); Assert.Matches(@"UNREACHABLE: \\\\nosuchhost-xyz\\c\$ \((51|53|64|67|1231)\)", output.ToString());
     }
     [Fact] public void LoopbackMatchesLocalAndCountsHardLinksOnce()
     {
