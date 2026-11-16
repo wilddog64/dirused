@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using Dirused.Cli;
+using Dirused.Common.Targets;
 using Dirused.Core;
 using Dirused.Core.Targets;
 using Xunit;
@@ -16,6 +17,21 @@ public class RemoteTargetTests
     }
     private sealed class Denied : INodeShares { public IEnumerable<NodeShare> Enumerate(string node) => throw new Win32Exception(5); }
     private sealed class UnreachableHost : INodeShares { public IEnumerable<NodeShare> Enumerate(string node) => throw new Win32Exception(1707); }
+    private sealed class MultiHostShares : INodeShares
+    {
+        public IEnumerable<NodeShare> Enumerate(string node)
+        {
+            if (node.EndsWith("h1", StringComparison.OrdinalIgnoreCase))
+                return new[] { new NodeShare("C$", 0x80000000), new NodeShare("D$", 0x80000000) };
+            if (node.EndsWith("h2", StringComparison.OrdinalIgnoreCase))
+                return new[] { new NodeShare("D$", 0x80000000) };
+            throw new ArgumentException($"Unexpected node: {node}");
+        }
+    }
+    private sealed class ThrowingShares : INodeShares
+    {
+        public IEnumerable<NodeShare> Enumerate(string node) => throw new InvalidOperationException("nodeShares should not be called");
+    }
     [Theory]
     [InlineData(51, "UNREACHABLE")]
     [InlineData(53, "UNREACHABLE")]
@@ -39,6 +55,26 @@ public class RemoteTargetTests
         Assert.Contains("ACCESS DENIED", TargetResolver.ResolveDetailed(new[] { @"\\node" }, new Denied())[0].Error);
         var invalid = Assert.Single(TargetResolver.ResolveDetailed(new[] { "C:relative" }));
         Assert.Equal("Invalid target: C:relative", invalid.Error);
+    }
+    [Fact]
+    public void E3_AllWithTargetsResolvesEveryAdminShareOnEachHostOnceAndNoLocalDrives()
+    {
+        var shares = new MultiHostShares();
+        var resolved = TargetResolver.ResolveDetailed(new[] { "/all", @"\\h1\d$", @"\\h2", @"\\h1" }, shares);
+        Assert.All(resolved, r => Assert.Null(r.Error));
+        Assert.Equal(new[] { @"\\h1\C$\", @"\\h1\D$\", @"\\h2\D$\" }, resolved.Select(x => x.Target.Display));
+    }
+    [Fact]
+    public void E4_AllWithNoOtherTargetResolvesLocalFixedDrivesAndNeverCallsNodeShares()
+    {
+        var throwing = new ThrowingShares();
+        var expected = DriveInfo.GetDrives()
+            .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+            .Select(d => TargetParser.Parse(d.Name)!.Display)
+            .ToArray();
+        var actual = TargetResolver.ResolveDetailed(new[] { "/all" }, throwing);
+        Assert.All(actual, r => Assert.Null(r.Error));
+        Assert.Equal(expected, actual.Select(x => x.Target.Display));
     }
     [Fact] public void RealNodeEnumerationMatchesNetShare()
     {
