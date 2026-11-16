@@ -12,7 +12,7 @@ public sealed class Scanner
     private readonly List<ScanError> errors = new();
     private long clusterSize;
 
-    public ScanResult Scan(string target)
+    public ScanResult Scan(string target, CancellationToken ct = default)
     {
         seen.Clear(); directories.Clear(); files.Clear(); errors.Clear();
         string full = Path.GetFullPath(target);
@@ -20,12 +20,13 @@ public sealed class Scanner
         var volume = Volumes.VolumeProbe.Probe(root);
         clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
-        Walk(full);
-        return new ScanResult(full, volume, directories.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), errors, errors.Count == 0);
+        Walk(full, ct);
+        return new ScanResult(full, volume, directories.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(), errors, errors.Count == 0 && !ct.IsCancellationRequested);
     }
 
-    private (long logical, long disk) Walk(string path)
+    private (long logical, long disk) Walk(string path, CancellationToken ct)
     {
+        if (ct.IsCancellationRequested) return (0, 0);
         long logical = 0, disk = 0;
         try
         {
@@ -33,6 +34,7 @@ public sealed class Scanner
             if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return (0, 0);
             foreach (var entry in info.EnumerateFileSystemInfos())
             {
+                if (ct.IsCancellationRequested) break;
                 string display = Unextended(entry.FullName);
                 try
                 {
@@ -40,7 +42,7 @@ public sealed class Scanner
                     if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                     if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        var child = Walk(display); logical += child.logical; disk += child.disk;
+                        var child = Walk(display, ct); logical += child.logical; disk += child.disk;
                     }
                     else
                     {

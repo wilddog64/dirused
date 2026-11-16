@@ -13,16 +13,27 @@ public static class Program
         if (parsed.Usage) { output.WriteLine(ArgParser.UsageText); return 0; }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
+        using var cts = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; cts.Cancel(); };
+        Console.CancelKeyPress += cancelHandler;
         try
         {
             var resolved = TargetResolver.ResolveDetailed(options.Targets, nodeShares);
             var targets = resolved.Select(x => x.Target).ToList();
             var byTarget = new Dictionary<Dirused.Common.Targets.Target, ResolvedTarget>(ReferenceEqualityComparer.Instance);
             foreach (var item in resolved) byTarget.TryAdd(item.Target, item);
-            var results = ScanRunner.Run(targets, (target, _) => RemoteScan.Scan(byTarget[target]), new RunOptions(options.Parallel, options.Timeout), CancellationToken.None)
+            Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
+                ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
+                : (target, token) => RemoteScan.Scan(byTarget[target], token);
+            var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
                 .Select(x => x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() }).ToList();
-            IRenderer renderer = options.Format switch { OutputFormat.Json => new JsonRenderer(), OutputFormat.Csv => new CsvRenderer(), _ => new TextRenderer() };
-            if (options.Format == OutputFormat.Text)
+            IRenderer renderer = options.Format switch
+            {
+                OutputFormat.Json => new JsonRenderer(options.Summary),
+                OutputFormat.Csv => new CsvRenderer(options.Summary),
+                _ => options.Summary ? new SummaryRenderer() : new TextRenderer()
+            };
+            if (options.Format == OutputFormat.Text && !options.Summary)
             {
                 foreach (var result in results)
                     if (!result.Complete && result.Volume.TotalBytes == 0 && result.Errors.Count == 1) output.WriteLine(result.Errors[0].Reason);
@@ -38,5 +49,18 @@ public static class Program
             return results.Any(r => !r.Complete) ? 3 : 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception or System.Security.SecurityException) { error.WriteLine(ex.Message); return 1; }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+        }
+    }
+
+    private static ScanResult ProbeSummary(string path)
+    {
+        string full = Path.GetFullPath(path);
+        string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
+        if (!Path.EndsInDirectorySeparator(root)) root += Path.DirectorySeparatorChar;
+        var volume = Dirused.Core.Volumes.VolumeProbe.Probe(root);
+        return new ScanResult(full, volume, new List<Entry>(), new List<Entry>(), new List<ScanError>(), true);
     }
 }
