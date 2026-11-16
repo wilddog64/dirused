@@ -36,10 +36,9 @@ Live checks
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1 -Targets fleet.txt
 
-  L1-L10 run against this machine (\\localhost and C:\). L2 is a known
-  failure until the 1707 fix ships (bare \\node that does not resolve prints
-  ERROR instead of UNREACHABLE). -Targets adds F1 (fleet /summary: every
-  failure must be labelled UNREACHABLE, ACCESS DENIED, TIMED OUT or CANCELLED)
+  L1-L10 run against this machine (\\localhost and C:\). -Targets adds F1
+  (fleet /summary: every failure must be labelled UNREACHABLE, ACCESS DENIED,
+  TIMED OUT or CANCELLED)
   and F2 (a full fleet scan with /parallel 8 finishes). Save the output and
   send it back; it is the live evidence.
 

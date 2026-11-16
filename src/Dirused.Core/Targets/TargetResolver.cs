@@ -33,7 +33,7 @@ public static class TargetResolver
     public static string ErrorMessage(string target, int code) => code switch
     {
         5 => $"ACCESS DENIED: {target} — admin shares need an administrator on the target",
-        51 or 53 or 64 or 67 or 1231 => $"UNREACHABLE: {target} ({code})",
+        51 or 53 or 64 or 67 or 1231 or 1707 => $"UNREACHABLE: {target} ({code})",
         _ => $"ERROR: {target} ({code})"
     };
 }

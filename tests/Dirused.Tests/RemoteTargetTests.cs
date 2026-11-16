@@ -15,13 +15,16 @@ public class RemoteTargetTests
         public IEnumerable<NodeShare> Enumerate(string node) => new[] { new NodeShare("ADMIN$", 0x80000000), new NodeShare("IPC$", 0x80000003), new NodeShare("C$", 0x80000000), new NodeShare("data", 0), new NodeShare("D$", 0x80000000) };
     }
     private sealed class Denied : INodeShares { public IEnumerable<NodeShare> Enumerate(string node) => throw new Win32Exception(5); }
+    private sealed class UnreachableHost : INodeShares { public IEnumerable<NodeShare> Enumerate(string node) => throw new Win32Exception(1707); }
     [Theory]
     [InlineData(51, "UNREACHABLE")]
     [InlineData(53, "UNREACHABLE")]
     [InlineData(64, "UNREACHABLE")]
     [InlineData(67, "UNREACHABLE")]
     [InlineData(1231, "UNREACHABLE")]
+    [InlineData(1707, "UNREACHABLE")]
     [InlineData(5, "ACCESS DENIED")]
+    [InlineData(1722, "ERROR")]
     [InlineData(2, "ERROR")]
     public void ErrorMessageClassifiesNativeErrors(int code, string label)
     {
@@ -52,6 +55,19 @@ public class RemoteTargetTests
         using var output = new StringWriter(); using var error = new StringWriter();
         Assert.Equal(3, Program.Run(new[] { @"\\node" }, output, error, new Denied()));
         Assert.Contains(@"ACCESS DENIED: \\node", output.ToString());
+    }
+    [Fact] public void UnreachableBareNodeReportsUnreachable()
+    {
+        var result = TargetResolver.ResolveDetailed(new[] { @"\\nosuchhost-xyz" }, new UnreachableHost());
+        var single = Assert.Single(result);
+        Assert.Equal(@"UNREACHABLE: \\nosuchhost-xyz (1707)", single.Error);
+        Assert.StartsWith("UNREACHABLE: ", TargetResolver.ErrorMessage(@"\\nosuchhost-xyz", 1707));
+    }
+    [Fact] public void UnreachableBareNodeIsReportedByProgram()
+    {
+        using var output = new StringWriter(); using var error = new StringWriter();
+        Assert.Equal(3, Program.Run(new[] { @"\\nosuchhost-xyz" }, output, error, new UnreachableHost()));
+        Assert.Contains(@"UNREACHABLE: \\nosuchhost-xyz (1707)", output.ToString());
     }
     [Fact] public void UnreachableShareDoesNotStopOtherTargets()
     {
