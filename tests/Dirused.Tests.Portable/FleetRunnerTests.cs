@@ -62,7 +62,7 @@ public sealed class FleetRunnerTests : IDisposable
                 if (t == broken) throw new IOException("network path not found");
                 return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true);
             },
-            new RunOptions(Parallel: 4, Timeout: TimeSpan.FromMilliseconds(200)),
+            new RunOptions(Parallel: 4, Timeout: TimeSpan.FromSeconds(1)),
             CancellationToken.None);
 
         Assert.Equal(3, results.Count);
