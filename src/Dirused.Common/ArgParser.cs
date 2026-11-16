@@ -17,13 +17,13 @@ public static class ArgParser
         "  C:\\x | c:/x | C:    Local path or drive root\n" +
         "  \\\\server\\share      UNC share (or //server/share)\n" +
         "  \\\\node | //node     All admin shares on a host\n" +
-        "  /all                All drives: local when no targets, else every drive on each target host\n" +
+        "  /all                All local drives, or every drive on each target host\n" +
         "\n" +
         "Switches (use /, - or -- in any case):\n" +
         "  /top <n>            Show top N entries (default: 50)\n" +
         "  /json               Output JSON (default: text)\n" +
         "  /csv                Output CSV (default: text)\n" +
-        "  /all                All drives: local when no targets, else every drive on each target host\n" +
+        "  /all                All local drives, or every drive on each target host\n" +
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
         "  /summary            Volume usage only, no directory walk (default: off)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
