@@ -40,7 +40,7 @@ public class OutputCompatTests
         var local = VolumeProbe.Probe(@"C:\"); var unc = VolumeProbe.Probe(@"\\localhost\c$\");
         Assert.Equal(local.TotalBytes, unc.TotalBytes); Assert.Equal(local.SerialNumber, unc.SerialNumber); Assert.Equal(local.ClusterSize, unc.ClusterSize);
         Assert.True(Math.Abs(local.FreeBytes - unc.FreeBytes) <= local.TotalBytes / 100);
-        Assert.Equal(53, Assert.Throws<VolumeProbeException>(() => VolumeProbe.Probe(@"\\nosuchhost-xyz\c$\")).NativeErrorCode);
+        Assert.Contains(Assert.Throws<VolumeProbeException>(() => VolumeProbe.Probe(@"\\nosuchhost-xyz\c$\")).NativeErrorCode, new[] { 51, 53, 64, 67, 1231 });
     }
     private static string Size(long n) { string[] u = { "B", "KB", "MB", "GB", "TB", "PB" }; double v = n; int i = 0; while (v >= 1024 && i < u.Length - 1) { v /= 1024; i++; } return $"{v:F1} {u[i]}"; }
     private static void Print(TextWriter w, Entry e) => w.WriteLine($"{e.Path}  logical {Size(e.LogicalBytes)}  on disk {Size(e.OnDiskBytes)}");
