@@ -14,6 +14,8 @@ public static class ScanRunner
         TimeSpan? timeout = options.Timeout is { } t && t > TimeSpan.Zero ? t : null;
         var workers = new Task[Math.Min(maxParallel, targets.Count)];
         int nextIndex = -1;
+        int abandoned = 0;
+        var abandonedGate = new object();
 
         for (int i = 0; i < workers.Length; i++)
         {
@@ -28,23 +30,94 @@ public static class ScanRunner
                         results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
                         continue;
                     }
-                    using var timeoutCts = timeout is { } d ? CancellationTokenSource.CreateLinkedTokenSource(ct) : null;
-                    if (timeoutCts != null && timeout is { } dur) timeoutCts.CancelAfter(dur);
-                    var scanCt = timeoutCts?.Token ?? ct;
-                    bool timedOut = false;
-                    ScanResult result;
-                    try
+                    if (timeout is { } duration)
                     {
-                        result = scan(target, scanCt);
-                        timedOut = timeoutCts != null && timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested;
-                    }
-                    catch (OperationCanceledException) when (timeoutCts != null && timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
-                    {
-                        timedOut = true;
-                        result = Incomplete(target, $"TIMED OUT after {FormatDuration(timeout!.Value)}");
+                        lock (abandonedGate)
+                        {
+                            if (abandoned >= maxParallel)
+                            {
+                                results[idx] = new TargetResult(target, Incomplete(target, $"SKIPPED: {abandoned} earlier targets still hung past /timeout"));
+                                continue;
+                            }
+                        }
+                        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        timeoutCts.CancelAfter(duration);
+                        using var done = new ManualResetEventSlim(false);
+                        ScanResult? scanResult = null;
+                        Exception? failure = null;
+                        bool markedAbandoned = false;
+                        var scanThread = new Thread(() =>
+                        {
+                            try { scanResult = scan(target, timeoutCts.Token); }
+                            catch (Exception ex) { failure = ex; }
+                            finally
+                            {
+                                done.Set();
+                                lock (abandonedGate)
+                                {
+                                    if (markedAbandoned) abandoned--;
+                                }
+                            }
+                        }) { IsBackground = true, Name = $"dirused-scan-{idx}" };
+                        scanThread.Start();
+                        TimeSpan wait = duration + TimeSpan.FromTicks(Math.Min(duration.Ticks, TimeSpan.FromSeconds(2).Ticks));
+                        if (!done.Wait(wait))
+                        {
+                            lock (abandonedGate)
+                            {
+                                if (done.IsSet)
+                                {
+                                    // The scan completed as the wait expired; handle its result below.
+                                }
+                                else
+                                {
+                                    markedAbandoned = true;
+                                    abandoned++;
+                                }
+                            }
+                            if (markedAbandoned)
+                            {
+                                results[idx] = new TargetResult(target, Incomplete(target, $"TIMED OUT after {FormatDuration(duration)}"));
+                                timeoutCts.Dispose();
+                                continue;
+                            }
+                        }
+                        bool timeoutRequested = timeoutCts.IsCancellationRequested;
+                        timeoutCts.Dispose();
+                        if (failure is OperationCanceledException && timeoutRequested && !ct.IsCancellationRequested)
+                        {
+                            results[idx] = new TargetResult(target, Incomplete(target, $"TIMED OUT after {FormatDuration(duration)}"));
+                            continue;
+                        }
+                        if (failure is OperationCanceledException && ct.IsCancellationRequested)
+                        {
+                            results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
+                            continue;
+                        }
+                        if (failure != null)
+                        {
+                            results[idx] = new TargetResult(target, Incomplete(target, failure.Message));
+                            continue;
+                        }
+                        var result = scanResult!;
+                        if (timeoutRequested && !ct.IsCancellationRequested)
+                        {
+                            var errors = result.Errors.ToList();
+                            errors.Add(new ScanError(target.Display, $"TIMED OUT after {FormatDuration(duration)}"));
+                            result = result with { Errors = errors, Complete = false };
+                        }
+                        else if (ct.IsCancellationRequested && !result.Errors.Any(e => e.Reason == "CANCELLED"))
+                        {
+                            var errors = result.Errors.ToList();
+                            errors.Add(new ScanError(target.Display, "CANCELLED"));
+                            result = result with { Errors = errors, Complete = false };
+                        }
                         results[idx] = new TargetResult(target, result);
                         continue;
                     }
+
+                    ScanResult unboundedResult;
+                    try { unboundedResult = scan(target, ct); }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
                         results[idx] = new TargetResult(target, Incomplete(target, "CANCELLED"));
@@ -55,21 +128,13 @@ public static class ScanRunner
                         results[idx] = new TargetResult(target, Incomplete(target, ex.Message));
                         continue;
                     }
-
-                    if (timedOut)
+                    if (ct.IsCancellationRequested && !unboundedResult.Errors.Any(e => e.Reason == "CANCELLED"))
                     {
-                        var errors = result.Errors.ToList();
-                        errors.Add(new ScanError(target.Display, $"TIMED OUT after {FormatDuration(timeout!.Value)}"));
-                        result = result with { Errors = errors, Complete = false };
-                    }
-                    else if (ct.IsCancellationRequested && !result.Errors.Any(e => e.Reason == "CANCELLED"))
-                    {
-                        var errors = result.Errors.ToList();
+                        var errors = unboundedResult.Errors.ToList();
                         errors.Add(new ScanError(target.Display, "CANCELLED"));
-                        result = result with { Errors = errors, Complete = false };
+                        unboundedResult = unboundedResult with { Errors = errors, Complete = false };
                     }
-
-                    results[idx] = new TargetResult(target, result);
+                    results[idx] = new TargetResult(target, unboundedResult);
                 }
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }

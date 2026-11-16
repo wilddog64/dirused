@@ -85,6 +85,78 @@ public sealed class FleetRunnerTests : IDisposable
     }
 
     [Fact]
+    public void E1_HungScanTimesOutAndQuickTargetCompletes()
+    {
+        var hung = TargetParser.Parse("C:\\hung")!;
+        var quick = TargetParser.Parse("C:\\quick")!;
+        using var release = new ManualResetEventSlim(false);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        IReadOnlyList<TargetResult> results;
+        try
+        {
+            results = ScanRunner.Run(new[] { hung, quick }, (t, _) =>
+            {
+                if (t == hung)
+                {
+                    release.Wait(TimeSpan.FromSeconds(30));
+                    return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true);
+                }
+                return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true);
+            }, new RunOptions(Parallel: 2, Timeout: TimeSpan.FromMilliseconds(300)), CancellationToken.None);
+        }
+        finally { release.Set(); }
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"Run took {watch.Elapsed}");
+        Assert.False(results[0].Result.Complete);
+        Assert.Contains(results[0].Result.Errors, e => e.Reason == "TIMED OUT after 0.3s");
+        Assert.True(results[1].Result.Complete);
+    }
+
+    [Fact]
+    public void E2_HungScansAreBoundedByParallelLimit()
+    {
+        var targets = Enumerable.Range(0, 4).Select(i => TargetParser.Parse($"C:\\hung{i}")!).ToArray();
+        using var release = new ManualResetEventSlim(false);
+        int calls = 0;
+        IReadOnlyList<TargetResult> results;
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            results = ScanRunner.Run(targets, (t, _) =>
+            {
+                Interlocked.Increment(ref calls);
+                release.Wait(TimeSpan.FromSeconds(30));
+                return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true);
+            }, new RunOptions(Parallel: 1, Timeout: TimeSpan.FromMilliseconds(200)), CancellationToken.None);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"Run took {watch.Elapsed}");
+        }
+        finally { release.Set(); }
+
+        Assert.Equal(1, calls);
+        Assert.Contains(results[0].Result.Errors, e => e.Reason == "TIMED OUT after 0.2s");
+        Assert.All(results.Skip(1), r =>
+        {
+            Assert.False(r.Result.Complete);
+            Assert.Contains(r.Result.Errors, e => e.Reason == "SKIPPED: 1 earlier targets still hung past /timeout");
+        });
+
+        using var releaseMany = new ManualResetEventSlim(false);
+        int manyCalls = 0;
+        try
+        {
+            var many = ScanRunner.Run(targets, (t, _) =>
+            {
+                Interlocked.Increment(ref manyCalls);
+                releaseMany.Wait(TimeSpan.FromSeconds(30));
+                return new ScanResult(t.Display, new Volume(t.Root, 1, 1, 2, 50), new(), new(), new(), true);
+            }, new RunOptions(Parallel: 4, Timeout: TimeSpan.FromMilliseconds(200)), CancellationToken.None);
+            Assert.Equal(4, manyCalls);
+            Assert.All(many, r => Assert.Contains(r.Result.Errors, e => e.Reason == "TIMED OUT after 0.2s"));
+        }
+        finally { releaseMany.Set(); }
+    }
+
+    [Fact]
     public void E4_ParallelCapsConcurrencyAndPreservesInputOrder()
     {
         var targets = Enumerable.Range(0, 8).Select(i => TargetParser.Parse($"C:\\t{i}")!).ToList();
