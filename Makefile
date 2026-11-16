@@ -15,7 +15,7 @@ help:
 	@echo "vm-sync       copy the working tree (tracked + untracked, not ignored) to C:\\src\\dirused"
 	@echo "vm-build      vm-sync, then dotnet build -c Release on the VM"
 	@echo "vm-test       vm-sync, then dotnet test -c Release on the VM"
-	@echo "vm-live       vm-build, then run tools/vm-live.ps1 live checks; evidence in .vagrant/live-evidence.md"
+	@echo "vm-live       vm-build, then run tools/live-check.ps1 live checks; evidence in .vagrant/live-evidence.md"
 	@echo "vm-halt       stop the VM"
 	@echo "vm-destroy    delete the VM and its D: disk"
 
@@ -54,10 +54,10 @@ LIVE_EVIDENCE := .vagrant/live-evidence.md
 vm-live: vm-build
 	@set -o pipefail; \
 	sha="$$(git rev-parse --short HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
-	vagrant winrm -s powershell -c '& C:\src\dirused\tools\vm-live.ps1; exit $$LASTEXITCODE' | tee .vagrant/live-body.txt; rc=$$?; \
+	vagrant winrm -s powershell -c '& C:\src\dirused\tools\live-check.ps1; exit $$LASTEXITCODE' | tee .vagrant/live-body.txt; rc=$$?; \
 	{ echo "artifact: dirused.exe built by make vm-build at $$sha"; \
 	  echo "environment: dirused-dev Vagrant VM ($$(vagrant status --machine-readable 2>/dev/null | awk -F, '$$3=="provider-name"{print $$4}')), $$(date -u +%Y-%m-%d)"; \
-	  echo "command: make vm-live (tools/vm-live.ps1)"; \
+	  echo "command: make vm-live (tools/live-check.ps1)"; \
 	  echo "rc: $$rc"; echo "---"; cat .vagrant/live-body.txt; } > $(LIVE_EVIDENCE); \
 	echo "evidence: $(LIVE_EVIDENCE)"; exit $$rc
 

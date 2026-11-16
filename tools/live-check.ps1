@@ -1,5 +1,13 @@
+param(
+    [string]$Exe = '',
+    [string]$Targets = ''
+)
 $ErrorActionPreference = 'Continue'
-$exe = 'C:\src\dirused\src\Dirused.Cli\bin\Release\net10.0-windows\dirused.exe'
+$exe = $Exe
+if (-not $exe) {
+    $nextToScript = Join-Path $PSScriptRoot 'dirused.exe'
+    if (Test-Path -LiteralPath $nextToScript) { $exe = $nextToScript } else { $exe = 'C:\src\dirused\src\Dirused.Cli\bin\Release\net10.0-windows\dirused.exe' }
+}
 $script:failed = 0
 $script:passed = 0
 
@@ -27,7 +35,7 @@ function ConvertFrom-DirusedJson($r) {
 }
 
 "host: $env:COMPUTERNAME  os: $((Get-CimInstance Win32_OperatingSystem).Caption)  date: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
-if (-not (Test-Path -LiteralPath $exe)) { "FAIL setup: $exe not found (run make vm-build)"; exit 1 }
+if (-not (Test-Path -LiteralPath $exe)) { "FAIL setup: $exe not found (run make vm-build, or pass -Exe)"; exit 1 }
 "exe: $exe  built: $((Get-Item -LiteralPath $exe).LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))"
 ""
 
@@ -91,6 +99,34 @@ $r = Invoke-Dirused @('/help')
 Test-Check 'L10' '/help prints switches and exit codes, exit 0' (($r.rc -eq 0) -and ($r.out -match 'Exit codes') -and ($r.out -match '/parallel')) $r
 
 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+
+if ($Targets) {
+    ""
+    "fleet: $Targets"
+    $r = Invoke-Dirused @('/file', $Targets, '/summary', '/timeout', '60s', '/parallel', '8', '/json')
+    $j = ConvertFrom-DirusedJson $r
+    $raw = @()
+    $labelled = 0
+    $complete = 0
+    if ($j) {
+        foreach ($t in $j.targets) {
+            if ($t.complete) {
+                $complete++
+                "    OK      $($t.target)  total=$($t.volume.totalBytes) free=$($t.volume.freeBytes) used=$($t.volume.percentUsed)%"
+            } else {
+                foreach ($e in $t.errors) {
+                    if ($e.reason -match '^(UNREACHABLE|ACCESS DENIED|TIMED OUT|CANCELLED)') { $labelled++ } else { $raw += $e.reason }
+                    "    FAILED  $($t.target)  $($e.reason)"
+                }
+            }
+        }
+    }
+    Test-Check 'F1' "fleet /summary: $complete complete, $labelled labelled failures, no unlabelled error codes" (($r.rc -eq 0 -or $r.rc -eq 3) -and $j -and $raw.Count -eq 0) $r
+    $r = Invoke-Dirused @('/file', $Targets, '/timeout', '120s', '/parallel', '8', '/top', '3')
+    "    full scan of the fleet: rc=$($r.rc) in $($r.seconds)s"
+    $r.out -split "`n" | Select-Object -First 60 | ForEach-Object { "    $_" }
+    Test-Check 'F2' 'fleet full scan with /parallel 8 and /timeout 120s finishes, exit 0 or 3' (($r.rc -eq 0) -or ($r.rc -eq 3)) $r
+}
 ""
 "RESULT: $script:passed passed, $script:failed failed"
 if ($script:failed -gt 0) { exit 1 }

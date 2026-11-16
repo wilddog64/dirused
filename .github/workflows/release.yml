@@ -1,0 +1,57 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test tests/Dirused.Tests.Portable -c Release
+      - run: dotnet publish src/Dirused.Cli -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o out/${{ matrix.rid }}
+      - name: Assemble zip
+        shell: pwsh
+        run: |
+          $name = "dirused-$($env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]','-')-${{ matrix.rid }}"
+          $stage = "pkg/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item out/${{ matrix.rid }}/dirused.exe $stage/
+          Copy-Item tools/live-check.ps1 $stage/
+          Copy-Item tools/PACKAGE-README.txt $stage/README.txt
+          "commit: $env:GITHUB_SHA" | Add-Content $stage/README.txt
+          Compress-Archive -Path "$stage/*" -DestinationPath "pkg/$name.zip"
+          (Get-FileHash "pkg/$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Set-Content "pkg/$name.zip.sha256"
+      - name: Smoke test
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: |
+          & out/win-x64/dirused.exe /help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dirused-${{ matrix.rid }}
+          path: pkg/*.zip*
+          retention-days: 30
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --prerelease --generate-notes
