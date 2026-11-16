@@ -70,13 +70,16 @@ Test-Check 'L4' '\\localhost /summary totals and free space equal Get-Volume byt
 $dir = Join-Path $env:TEMP 'dirused-live'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $file = Join-Path $dir 'targets.txt'
-Set-Content -LiteralPath $file -Encoding UTF8 -Value @('# fleet list with a BOM, a comment and a blank line', '', 'C:\Windows\Web', '\\localhost\C$\Windows\Web', '\\nosuchhost-xyz\c$')
+[IO.File]::WriteAllLines($file, [string[]]@('# fleet list with a BOM, a comment and a blank line', '', 'C:\Windows\Web', '\\localhost\C$\Windows\Web', '\\nosuchhost-xyz\c$'), (New-Object System.Text.UTF8Encoding $true))
+$head = [IO.File]::ReadAllBytes($file)[0..2]
+$bomOk = ($head[0] -eq 0xEF) -and ($head[1] -eq 0xBB) -and ($head[2] -eq 0xBF)
 $r = Invoke-Dirused @('/file', $file, '/parallel', '8', '/timeout', '60s', '/top', '1', '/json')
 $j = ConvertFrom-DirusedJson $r
 $order = @()
 if ($j) { $order = @($j.targets | ForEach-Object { $_.target }) }
 $fileOk = ($r.rc -eq 3) -and $j -and ($order.Count -eq 3) -and ($order[0] -like 'C:\Windows\Web*') -and ($order[1] -like '\\localhost\C$\Windows\Web*') -and ($order[2] -like '\\nosuchhost-xyz*') -and $j.targets[0].complete -and $j.targets[1].complete -and (-not $j.targets[2].complete)
-Test-Check 'L5' '/file with BOM+comment+blank, /parallel 8: 3 targets in input order, unreachable one fails alone, exit 3' $fileOk $r
+Test-Check 'L5' '/file with BOM+comment+blank, /parallel 8: 3 targets in input order, unreachable one fails alone, exit 3' ($fileOk -and $bomOk) $r
+if (-not $bomOk) { '    fixture: targets.txt does not start with a UTF-8 BOM' }
 
 $sameTotals = $false
 if ($j -and $order.Count -eq 3) {
