@@ -62,6 +62,8 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
                 }
             }
 
+            foreach (string path in r.SystemOnly) output.WriteLine($"{path}: system only (not counted)");
+
             if (!r.Complete)
             {
                 output.WriteLine($"INCOMPLETE: {r.Errors.Count} directories could not be read");

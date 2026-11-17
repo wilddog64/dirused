@@ -336,6 +336,71 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public void Test_SystemVolumeInformationDeniedIsNotCounted()
+    {
+        AssertSystemVolumeInformationDenied(new UnauthorizedAccessException("denied"));
+    }
+
+    [Fact]
+    public void Test_SystemVolumeInformationWin32DeniedIsNotCounted()
+    {
+        AssertSystemVolumeInformationDenied(new Win32Exception(5));
+    }
+
+    private void AssertSystemVolumeInformationDenied(Exception denied)
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string systemPath = Path.Combine(volumeRoot, "System Volume Information");
+        string dataPath = Path.Combine(volumeRoot, "data");
+        var scanner = new Scanner(path =>
+        {
+            if (path == volumeRoot) return new[] { new DirEntry("System Volume Information", FileAttributes.Directory, 0, 0), new DirEntry("data", FileAttributes.Directory, 0, 0) };
+            if (path == systemPath) throw denied;
+            if (path == dataPath) return Array.Empty<DirEntry>();
+            throw new InvalidOperationException($"Unexpected path: {path}");
+        });
+
+        var result = scanner.Scan(volumeRoot);
+        Assert.True(result.Complete);
+        Assert.Empty(result.Errors);
+        Assert.Equal(new[] { systemPath }, result.SystemOnly);
+        Assert.Contains(result.Directories, entry => entry.Path == dataPath);
+    }
+
+    [Fact]
+    public void Test_OtherDeniedFolderIsStillIncomplete()
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string secretPath = Path.Combine(volumeRoot, "secret");
+        var scanner = new Scanner(path => path == volumeRoot
+            ? new[] { new DirEntry("secret", FileAttributes.Directory, 0, 0) }
+            : throw new UnauthorizedAccessException("denied"));
+
+        var result = scanner.Scan(volumeRoot);
+        Assert.False(result.Complete);
+        Assert.Equal(secretPath, Assert.Single(result.Errors).Path);
+        Assert.Empty(result.SystemOnly);
+    }
+
+    [Fact]
+    public void Test_NestedSystemVolumeInformationIsStillIncomplete()
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string nestedPath = Path.Combine(volumeRoot, "a", "System Volume Information");
+        string aPath = Path.Combine(volumeRoot, "a");
+        var scanner = new Scanner(path => path == volumeRoot
+            ? new[] { new DirEntry("a", FileAttributes.Directory, 0, 0) }
+            : path == aPath
+                ? new[] { new DirEntry("System Volume Information", FileAttributes.Directory, 0, 0) }
+                : throw new UnauthorizedAccessException("denied"));
+
+        var result = scanner.Scan(volumeRoot);
+        Assert.False(result.Complete);
+        Assert.Equal(nestedPath, Assert.Single(result.Errors).Path);
+        Assert.Empty(result.SystemOnly);
+    }
+
+    [Fact]
     public void Test5_JsonDefaultExactFalseAndDepth1AndCsvHeader()
     {
         string tree = PathIn("t5_tree");

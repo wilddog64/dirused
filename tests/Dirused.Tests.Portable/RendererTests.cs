@@ -22,6 +22,17 @@ public class RendererTests
     }
 
     [Fact]
+    public void Test_TextShowsSystemOnlyLine()
+    {
+        const string path = @"C:\System Volume Information";
+        var result = Result with { SystemOnly = new() { path } };
+        using var w = new StringWriter();
+        new TextRenderer().Render(w, new[] { result });
+        Assert.Contains(path + ": system only (not counted)", w.ToString());
+        Assert.DoesNotContain("INCOMPLETE", w.ToString());
+    }
+
+    [Fact]
     public void CsvMatchesM1a()
     {
         using var w = new StringWriter();
@@ -62,7 +73,8 @@ public class RendererTests
       ],
       "errors": [],
       "complete": true,
-      "exact": false
+      "exact": false,
+      "systemOnly": []
     }
   ]
 }

@@ -9,8 +9,10 @@ public sealed class Scanner
     private readonly List<Entry> directories = new();
     private readonly List<Entry> files = new();
     private readonly List<ScanError> errors = new();
+    private readonly List<string> systemOnly = new();
     private readonly Func<string, IReadOnlyList<DirEntry>> reader;
     private long clusterSize;
+    private string volumeRoot = "";
     private bool stopReported;
 
     public long PerFileCalls { get; private set; }
@@ -29,12 +31,13 @@ public sealed class Scanner
 
     public ScanResult Scan(string target, int deep = 1, bool exact = false, CancellationToken ct = default)
     {
-        seen.Clear(); directories.Clear(); files.Clear(); errors.Clear();
+        seen.Clear(); directories.Clear(); files.Clear(); errors.Clear(); systemOnly.Clear();
         stopReported = false;
         PerFileCalls = 0;
         FallbackDirectories = 0;
         string full = Path.GetFullPath(target);
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
+        volumeRoot = root;
         var volume = Volumes.VolumeProbe.Probe(root);
         clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
@@ -46,7 +49,7 @@ public sealed class Scanner
             files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(),
             errors,
             errors.Count == 0 && !ct.IsCancellationRequested,
-            exact);
+            exact) { SystemOnly = systemOnly.ToList() };
     }
 
     private (long logical, long disk) Walk(string path, int depth, int maxDepth, bool exact, CancellationToken ct)
@@ -162,7 +165,11 @@ public sealed class Scanner
             }
             if (ct.IsCancellationRequested) ReportStop(path);
         }
-        catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(path, ex.Message)); }
+        catch (Exception ex) when (IsScanError(ex))
+        {
+            if (IsSystemOnlyDenied(ex, path)) systemOnly.Add(path);
+            else errors.Add(new ScanError(path, ex.Message));
+        }
         return (logical, disk);
     }
 
@@ -174,6 +181,14 @@ public sealed class Scanner
     }
 
     private static bool IsScanError(Exception ex) => ex is IOException or UnauthorizedAccessException or Win32Exception or System.Security.SecurityException;
+    private bool IsSystemOnlyDenied(Exception ex, string path)
+    {
+        bool denied = ex is UnauthorizedAccessException || ex is Win32Exception win32 && win32.NativeErrorCode == 5;
+        if (!denied || !string.Equals(Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "System Volume Information", StringComparison.OrdinalIgnoreCase)) return false;
+        string? parent = Path.GetDirectoryName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        static string TrimSeparators(string value) => value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return parent != null && string.Equals(TrimSeparators(parent), TrimSeparators(volumeRoot), StringComparison.OrdinalIgnoreCase);
+    }
     private static string Extended(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path : path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
     private static string Unextended(string path) => path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) ? @"\\" + path[8..] : path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
     private long RoundToCluster(long size) => checked((size / clusterSize + (size % clusterSize == 0 ? 0 : 1)) * clusterSize);
