@@ -15,6 +15,7 @@ public static class DirectoryReader
     private const int FileIdBothDirectoryInfo = 10;
     private const int FileIdBothDirectoryRestartInfo = 11;
     private const int ERROR_NO_MORE_FILES = 18;
+    private const int ERROR_FILE_NOT_FOUND = 2;
 
     internal static string Extended(string path) =>
         path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path :
@@ -48,7 +49,7 @@ public static class DirectoryReader
                 if (!Native.Kernel32.GetFileInformationByHandleEx(handle, infoClass, buffer, BufferSize))
                 {
                     int error = Marshal.GetLastWin32Error();
-                    if (error == ERROR_NO_MORE_FILES)
+                    if (error == ERROR_NO_MORE_FILES || (error == ERROR_FILE_NOT_FOUND && infoClass == FileIdBothDirectoryRestartInfo))
                     {
                         break;
                     }

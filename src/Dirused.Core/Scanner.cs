@@ -132,7 +132,8 @@ public sealed class Scanner
                         {
                             long length = entry.EndOfFile;
                             bool placeholder = ((uint)attributes & (0x00400000u | 0x00040000u | 0x1000u)) != 0;
-                            bool duplicate = !placeholder && !seen.Add(entry.FileId);
+                            bool hasId = entry.FileId != 0 && entry.FileId != ulong.MaxValue;
+                            bool duplicate = !placeholder && hasId && !seen.Add(entry.FileId);
                             long countedLength;
                             long allocated;
                             if (duplicate)

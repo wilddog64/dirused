@@ -199,6 +199,27 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public void Test_MissingFileIdIsNotDeduplicated()
+    {
+        string dir = PathIn("no_file_id");
+        Directory.CreateDirectory(dir);
+        var entries = new List<DirEntry>
+        {
+            new("a.bin", FileAttributes.Normal, 100, 0),
+            new("b.bin", FileAttributes.Normal, 200, 0),
+            new("c.bin", FileAttributes.Normal, 300, ulong.MaxValue),
+            new("d.bin", FileAttributes.Normal, 400, ulong.MaxValue),
+            new("e.bin", FileAttributes.Normal, 500, 42),
+            new("f.bin", FileAttributes.Normal, 600, 42),
+        };
+        var scanner = new Scanner(_ => entries);
+        var res = scanner.Scan(dir, deep: 1);
+        Assert.True(res.Complete);
+        Assert.Equal(100 + 200 + 300 + 400 + 500, res.Files.Sum(f => f.LogicalBytes));
+        Assert.Equal(0, res.Files.Single(f => f.Path.EndsWith("f.bin")).LogicalBytes);
+    }
+
+    [Fact]
     public void Test_FallbackWhenListingRejected()
     {
         string tree = PathIn("fallback_tree");
