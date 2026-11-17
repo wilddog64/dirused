@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dirused.Common.Renderers;
 using Dirused.Core;
 using Xunit;
@@ -51,5 +52,48 @@ public class RendererTests
 }
 """;
         Assert.Equal(expected.ReplaceLineEndings(Environment.NewLine) + Environment.NewLine, w.ToString());
+    }
+
+    [Fact]
+    public void E1_SummaryKeepsHostsSharingVolumeSerialNumberInTextJsonAndCsv()
+    {
+        var rA = new ScanResult(@"\\a\d$", new Volume(@"\\a\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x12345678 }, new(), new(), new(), true);
+        var rB = new ScanResult(@"\\b\d$", new Volume(@"\\b\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x12345678 }, new(), new(), new(), true);
+        var results = new[] { rA, rB };
+
+        using var textOut = new StringWriter();
+        new SummaryRenderer().Render(textOut, results);
+        var textLines = textOut.ToString().TrimEnd().Split(Environment.NewLine);
+        Assert.Equal(2, textLines.Length);
+
+        using var jsonOut = new StringWriter();
+        new JsonRenderer(summary: true).Render(jsonOut, results);
+        using var doc = JsonDocument.Parse(jsonOut.ToString());
+        var targets = doc.RootElement.GetProperty("targets");
+        Assert.Equal(2, targets.GetArrayLength());
+
+        using var csvOut = new StringWriter();
+        new CsvRenderer(summary: true).Render(csvOut, results);
+        var csvLines = csvOut.ToString().TrimEnd().Split(Environment.NewLine);
+        var volumeRows = csvLines.Where(l => l.StartsWith("volume,")).ToList();
+        Assert.Equal(2, volumeRows.Count);
+    }
+
+    [Fact]
+    public void E2_SummaryDeduplicatesLocalDriveLettersOnSameVolumeAndCaseInsensitiveRemoteHost()
+    {
+        var local1 = new ScanResult(@"C:\", new Volume(@"C:\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x9999 }, new(), new(), new(), true);
+        var local2 = new ScanResult(@"C:\mnt", new Volume(@"C:\mnt\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x9999 }, new(), new(), new(), true);
+        using var textLocal = new StringWriter();
+        new SummaryRenderer().Render(textLocal, new[] { local1, local2 });
+        var localLines = textLocal.ToString().TrimEnd().Split(Environment.NewLine);
+        Assert.Single(localLines);
+
+        var remoteUpper = new ScanResult(@"\\A\d$", new Volume(@"\\A\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x8888 }, new(), new(), new(), true);
+        var remoteLower = new ScanResult(@"\\a\d$", new Volume(@"\\a\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x8888 }, new(), new(), new(), true);
+        using var textRemote = new StringWriter();
+        new SummaryRenderer().Render(textRemote, new[] { remoteUpper, remoteLower });
+        var remoteLines = textRemote.ToString().TrimEnd().Split(Environment.NewLine);
+        Assert.Single(remoteLines);
     }
 }

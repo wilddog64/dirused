@@ -30,11 +30,28 @@ public sealed class SummaryRenderer : IRenderer
                 failed.Add(r);
                 continue;
             }
+            string host = ExtractHost(r.Target);
             string key = r.Volume.SerialNumber != 0
-                ? $"serial:{r.Volume.SerialNumber}"
-                : $"drive:{r.Volume.Drive}";
+                ? $"{host}:serial:{r.Volume.SerialNumber}"
+                : $"{host}:drive:{r.Volume.Drive}";
             if (seen.Add(key)) volumes.Add(r);
         }
         return (volumes.OrderByDescending(r => r.Volume.PercentUsed).ToList(), failed);
+    }
+
+    private static string ExtractHost(string target)
+    {
+        if (string.IsNullOrEmpty(target)) return "";
+        string t = target;
+        if (t.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            t = @"\\" + t[8..];
+        else if (t.StartsWith("//?/UNC/", StringComparison.OrdinalIgnoreCase))
+            t = @"//" + t[8..];
+        if (t.StartsWith(@"\\", StringComparison.Ordinal) || t.StartsWith("//", StringComparison.Ordinal))
+        {
+            int slash = t.IndexOfAny(new[] { '\\', '/' }, 2);
+            return slash >= 0 ? t[2..slash] : t[2..];
+        }
+        return "";
     }
 }
