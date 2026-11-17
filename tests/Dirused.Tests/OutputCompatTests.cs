@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Dirused.Cli;
 using Dirused.Common.Renderers;
@@ -8,6 +9,22 @@ using Xunit;
 namespace Dirused.Tests;
 public class OutputCompatTests
 {
+    [Fact]
+    public void Test_CsvStderrNamesStoppedFolder()
+    {
+        var volume = new Volume("C:", 0, 0, 0, 0);
+        var result = new ScanResult("C:\\share", volume, new List<Entry>(), new List<Entry>(), new List<ScanError>
+        {
+            new("C:\\share\\folder", "not finished: scan stopped")
+        }, false);
+        using var error = new StringWriter();
+        var writeCsvErrors = typeof(Program).GetMethod("WriteCsvErrors", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        writeCsvErrors.Invoke(null, new object[] { error, new[] { result } });
+
+        Assert.Equal($"C:\\share\\folder: not finished: scan stopped{Environment.NewLine}", error.ToString());
+    }
+
     [Fact]
     public void FormatsMatchM1aForTreeWithLinks()
     {

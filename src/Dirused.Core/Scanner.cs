@@ -160,6 +160,7 @@ public sealed class Scanner
                     catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(childPath, ex.Message)); }
                 }
             }
+            if (ct.IsCancellationRequested) ReportStop(path);
         }
         catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(path, ex.Message)); }
         return (logical, disk);

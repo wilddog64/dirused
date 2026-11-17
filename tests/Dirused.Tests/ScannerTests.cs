@@ -240,6 +240,54 @@ public sealed class ScannerTests : IDisposable
         Assert.Equal(deep, error.Path);
         Assert.Equal("not finished: scan stopped", error.Reason);
         Assert.DoesNotContain(result.Errors, e => e.Path == b);
+        Assert.False(result.Complete);
+    }
+
+    [Fact]
+    public void Test_StoppedScanInEmptyFolderNamesIt()
+    {
+        string a = PathIn("a");
+        string b = PathIn("b");
+        bool readB = false;
+        using var cts = new CancellationTokenSource();
+        var scanner = new Scanner(path =>
+        {
+            if (path == root) return new[] { new DirEntry("a", FileAttributes.Directory, 0, 0), new DirEntry("b", FileAttributes.Directory, 0, 0) };
+            if (path == a)
+            {
+                cts.Cancel();
+                return Array.Empty<DirEntry>();
+            }
+            if (path == b) readB = true;
+            return Array.Empty<DirEntry>();
+        });
+
+        var result = scanner.Scan(root, ct: cts.Token);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(a, error.Path);
+        Assert.Equal("not finished: scan stopped", error.Reason);
+        Assert.False(result.Complete);
+        Assert.False(readB);
+    }
+
+    [Fact]
+    public void Test_StoppedScanInLastFolderNamesIt()
+    {
+        string a = PathIn("a");
+        using var cts = new CancellationTokenSource();
+        var scanner = new Scanner(path =>
+        {
+            if (path == root) return new[] { new DirEntry("a", FileAttributes.Directory, 0, 0) };
+            Assert.Equal(a, path);
+            cts.Cancel();
+            return new[] { new DirEntry("file", FileAttributes.Normal, 1, 0) };
+        });
+
+        var result = scanner.Scan(root, ct: cts.Token);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(a, error.Path);
+        Assert.Equal("not finished: scan stopped", error.Reason);
+        Assert.False(result.Complete);
     }
 
     [Fact]
@@ -251,6 +299,7 @@ public sealed class ScannerTests : IDisposable
 
         var result = scanner.Scan(root, ct: cts.Token);
         Assert.DoesNotContain(result.Errors, e => e.Reason == "not finished: scan stopped");
+        Assert.False(result.Complete);
     }
 
     [Fact]
