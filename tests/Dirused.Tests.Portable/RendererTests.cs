@@ -83,6 +83,24 @@ public class RendererTests
     }
 
     [Fact]
+    public void TextRowsSortByDisplayedSize()
+    {
+        var vol = new Volume("C:\\", 1024, 1024, 2048, 50);
+        var entries = new List<Entry>
+        {
+            new("a-small", 100, 4096),
+            new("b-larger", 4000, 4096),
+            new("sparse", 64L * 1024 * 1024, 4096)
+        };
+        using var w = new StringWriter();
+        new TextRenderer(exact: true).Render(w, new[] { new ScanResult("T", vol, new(), entries, new(), true, true) });
+        var lines = w.ToString().TrimEnd().Split(Environment.NewLine);
+        Assert.StartsWith("sparse", lines[1]);
+        Assert.StartsWith("b-larger", lines[2]);
+        Assert.StartsWith("a-small", lines[3]);
+    }
+
+    [Fact]
     public void Test7_TextRowPaddingAndConsoleWrapping()
     {
         var vol = new Volume("C:\\", 1024, 1024, 2048, 50);

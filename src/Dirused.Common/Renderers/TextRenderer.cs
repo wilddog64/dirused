@@ -24,7 +24,7 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
             output.WriteLine($"{v.Drive}  used {Format.Short(v.UsedBytes)}, free {Format.Short(v.FreeBytes)}, total {Format.Short(v.TotalBytes)}, {v.PercentUsed:F1}% used");
 
             var rows = r.Directories.Concat(r.Files)
-                .OrderByDescending(x => x.OnDiskBytes)
+                .OrderByDescending(x => x.LogicalBytes)
                 .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
                 .Take(top)
                 .ToList();
