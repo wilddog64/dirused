@@ -79,8 +79,8 @@ Switches (use /, - or -- in any case):
   /file <path>        Read targets from file, one per line (default: none)
   /summary            Volume usage; a /warn or /crit volume also lists
                       its top 3 folders (default: off)
-  /warn <n>           Warning fullness threshold (default: 85)
-  /crit <n>           Critical fullness threshold (default: 90)
+  /warn [n]           Warning fullness threshold (default: 85)
+  /crit [n]           Critical fullness threshold (default: 90)
   /deep [n]           List n directory levels, 1-32 (/deep alone: 2)
   /exact              On-disk sizes and hard-link dedup (slower)
   /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)

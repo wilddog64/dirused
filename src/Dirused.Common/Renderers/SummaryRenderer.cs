@@ -41,13 +41,17 @@ public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = f
                 failed.Add(r);
                 continue;
             }
-            string host = ExtractHost(r.Target);
-            string key = r.Volume.SerialNumber != 0
-                ? $"{host}:serial:{r.Volume.SerialNumber}"
-                : $"{host}:drive:{r.Volume.Drive}";
-            if (seen.Add(key)) volumes.Add(r);
+            if (seen.Add(VolumeKey(r))) volumes.Add(r);
         }
         return (volumes.OrderByDescending(r => r.Volume.PercentUsed).ToList(), failed);
+    }
+
+    internal static string VolumeKey(ScanResult r)
+    {
+        string host = ExtractHost(r.Target);
+        return r.Volume.SerialNumber != 0
+            ? $"{host}:serial:{r.Volume.SerialNumber}"
+            : $"{host}:drive:{r.Volume.Drive}";
     }
 
     private static string ExtractHost(string target)

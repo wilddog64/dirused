@@ -15,10 +15,65 @@ public sealed class TopFoldersTests
     private static ScanResult FolderScan(string name, params Entry[] entries) => Result(name) with { Directories = entries.ToList() };
 
     [Fact]
+    public void Test7_AttachWalksOnlyFirstTargetPerVolume()
+    {
+        var targets = new[] { Target("first"), Target("second"), Target("third") };
+        var results = new[]
+        {
+            Result("first") with { Volume = new("C:\\", 50, 50, 100, 95) { SerialNumber = 123 }, Level = FullnessLevel.Crit },
+            Result("second") with { Volume = new("C:\\", 50, 50, 100, 95) { SerialNumber = 123 }, Level = FullnessLevel.Crit },
+            Result("third") with { Volume = new("D:\\", 50, 50, 100, 95) { SerialNumber = 456 }, Level = FullnessLevel.Crit }
+        };
+        var walked = new List<string>();
+        var attached = TopFolders.Attach(targets, results, (t, _) => { lock (walked) walked.Add(t.Display); return FolderScan(t.Display, new Entry(t.Display, 1, 0)); }, new(), CancellationToken.None);
+        Assert.Equal(new[] { "first", "third" }, walked.OrderBy(name => name));
+        Assert.Equal("first", attached[0].Directories[0].Path);
+        Assert.Empty(attached[1].Directories);
+        Assert.Null(attached[1].TopFoldersNote);
+        Assert.Equal("third", attached[2].Directories[0].Path);
+    }
+
+    [Fact]
+    public void Test8_AttachWalksDifferentSerialNumbers()
+    {
+        var targets = new[] { Target("first"), Target("second") };
+        var results = new[]
+        {
+            Result("first") with { Volume = new("C:\\", 50, 50, 100, 95) { SerialNumber = 123 }, Level = FullnessLevel.Crit },
+            Result("second") with { Volume = new("D:\\", 50, 50, 100, 95) { SerialNumber = 456 }, Level = FullnessLevel.Crit }
+        };
+        var walked = new List<string>();
+        TopFolders.Attach(targets, results, (t, _) => { lock (walked) walked.Add(t.Display); return FolderScan(t.Display, new Entry(t.Display, 1, 0)); }, new(), CancellationToken.None);
+        Assert.Equal(new[] { "first", "second" }, walked.OrderBy(name => name));
+    }
+
+    [Fact]
+    public void Test9_AttachUsesDriveWhenSerialNumberIsZero()
+    {
+        var targets = new[] { Target("first"), Target("second") };
+        var results = new[]
+        {
+            Result("first") with { Volume = new("C:\\", 50, 50, 100, 95), Level = FullnessLevel.Crit },
+            Result("second") with { Volume = new("C:\\", 50, 50, 100, 95), Level = FullnessLevel.Crit }
+        };
+        var walked = new List<string>();
+        var attached = TopFolders.Attach(targets, results, (t, _) => { lock (walked) walked.Add(t.Display); return FolderScan(t.Display, new Entry(t.Display, 1, 0)); }, new(), CancellationToken.None);
+        Assert.Equal(new[] { "first" }, walked.OrderBy(name => name));
+        Assert.Empty(attached[1].Directories);
+        Assert.Null(attached[1].TopFoldersNote);
+    }
+
+    [Fact]
     public void Test_AttachWalksOnlyWarnAndCritTargets()
     {
         var targets = new[] { Target("ok"), Target("warn"), Target("crit"), Target("null") };
-        var results = new[] { Result("ok") with { Level = FullnessLevel.Ok }, Result("warn") with { Level = FullnessLevel.Warn }, Result("crit") with { Level = FullnessLevel.Crit }, Result("null") };
+        var results = new[]
+        {
+            Result("ok") with { Level = FullnessLevel.Ok },
+            Result("warn") with { Volume = new("C:\\", 50, 50, 100, 90) { SerialNumber = 1 }, Level = FullnessLevel.Warn },
+            Result("crit") with { Volume = new("D:\\", 50, 50, 100, 95) { SerialNumber = 2 }, Level = FullnessLevel.Crit },
+            Result("null")
+        };
         var walked = new List<string>();
         var walkedLock = new object();
         var attached = TopFolders.Attach(targets, results, (t, _) =>

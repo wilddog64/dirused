@@ -7,7 +7,7 @@ public static class ArgParser
 {
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
-        "               [/top N] [/json|/csv] [/warn <1-100>] [/crit <1-100>]\n" +
+        "               [/top N] [/json|/csv] [/warn [1-100]] [/crit [1-100]]\n" +
         "Run dirused /help for more.";
 
     public const string UsageText =
@@ -28,8 +28,8 @@ public static class ArgParser
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
         "  /summary            Volume usage; a /warn or /crit volume also lists\n" +
         "                      its top 3 folders (default: off)\n" +
-        "  /warn <n>           Warning fullness threshold (default: 85)\n" +
-        "  /crit <n>           Critical fullness threshold (default: 90)\n" +
+        "  /warn [n]           Warning fullness threshold (default: 85)\n" +
+        "  /crit [n]           Critical fullness threshold (default: 90)\n" +
         "  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)\n" +
         "  /exact              On-disk sizes and hard-link dedup (slower)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
@@ -81,10 +81,16 @@ public static class ArgParser
                         file = args[i]; break;
                     case "summary": summary = true; break;
                     case "warn":
-                        if (++i >= args.Length || !int.TryParse(args[i], out warn) || warn < 1 || warn > 100) return new(Error: "/warn requires an integer between 1 and 100");
+                        if (i + 1 < args.Length && args[i + 1].Length > 0 && args[i + 1].All(char.IsAsciiDigit))
+                        {
+                            if (!int.TryParse(args[++i], out warn) || warn < 1 || warn > 100) return new(Error: "/warn requires an integer between 1 and 100");
+                        }
                         break;
                     case "crit":
-                        if (++i >= args.Length || !int.TryParse(args[i], out crit) || crit < 1 || crit > 100) return new(Error: "/crit requires an integer between 1 and 100");
+                        if (i + 1 < args.Length && args[i + 1].Length > 0 && args[i + 1].All(char.IsAsciiDigit))
+                        {
+                            if (!int.TryParse(args[++i], out crit) || crit < 1 || crit > 100) return new(Error: "/crit requires an integer between 1 and 100");
+                        }
                         break;
                     case "deep":
                         deepGiven = true;
