@@ -64,8 +64,29 @@ public sealed class HtmlRendererTests
         new HtmlRenderer(true, 85, 90, 50).Render(writer, results);
         var html = writer.ToString();
         var nodes = html.Substring(html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal), html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal) - html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal));
-        Assert.Equal(1, nodes.Split("<tr><td>").Length - 1);
+        Assert.Equal(1, nodes.Split("</td></tr>").Length - 1);
         Assert.Contains("<td class=\"num\">2</td>", nodes);
+    }
+
+    [Fact]
+    public void H16_ColoursFollowWarnAndCrit()
+    {
+        var results = new[] { R(@"\\srv1\c$", 95), R(@"\\srv2\c$", 87), R(@"\\srv3\c$", 10) };
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, results);
+        var html = writer.ToString();
+        var nodes = html.Substring(html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal), html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal) - html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal));
+        Assert.Contains("<tr class=\"crit\"><td>srv1</td>", nodes);
+        Assert.Contains("<tr class=\"warn\"><td>srv2</td>", nodes);
+        Assert.Contains("<tr><td>srv3</td>", nodes);
+        Assert.Contains("<span class=\"lvl\">CRIT</span>", html);
+        Assert.Contains("<span class=\"lvl\">WARN</span>", html);
+        Assert.Contains(".crit .bar>span{background:", html);
+        Assert.Contains(".warn .bar>span{background:", html);
+
+        using var lowered = new StringWriter();
+        new HtmlRenderer(true, 5, 9, 50).Render(lowered, results);
+        Assert.Contains("<tr class=\"crit\"><td>srv3</td>", lowered.ToString());
     }
 
     private static ScanResult R(string target, double percent) => new(target,
