@@ -24,6 +24,9 @@ the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see t
     dirused .
     dirused C:\path /top 10
     dirused D:\
+    dirused D:\ /deep
+    dirused D:\ /deep 3
+    dirused D:\ /exact
     dirused D:
     dirused d:/apps
     dirused sub/dir
@@ -38,6 +41,54 @@ the offline gate. Multi-node UNC and purge testing needs real nodes (ACG); see t
     dirused --help
 
 A bare node scans its lettered administrative disk shares (such as `C$` and `D$`). Admin shares require administrator rights on the target; scans use the current Windows token. Relative paths resolve against the current directory.
+
+### Output format
+
+By default, dirused prints the volume summary line followed by top-level entries (depth 1) sorted largest first, with human-readable sizes:
+
+```
+C:\  used 42.1G, free 57.9G, total 100G, 42.1% used
+C:\Users          28G
+C:\Windows        12G
+C:\Program Files   2.1G
+C:\dump.bin      512M
+```
+
+- **Top-level by default:** A bare scan lists entries at depth 1 (immediate children of the target). Subtree totals are fully computed.
+- **/deep [n]:** List entries down to `n` directory levels (1–32). Running `/deep` without an argument defaults to 2 levels.
+- **/exact:** By default, scan speeds over the network by reading file length and locally rounding to the volume cluster size without per-file file opens or compression checks. Hard links are counted once per link. With `/exact`, dirused queries on-disk allocation (`GetCompressedFileSize`) and deduplicates hard links.
+- **On disk vs. logical:** "Logical" size is the apparent file length; "on disk" is the space allocated in whole volume clusters (e.g. 4 KB on NTFS, so a 27.2 KB file occupies 28 KB), smaller only for compressed or sparse files. In `/exact` mode, any row whose on-disk size differs from its logical size by more than one cluster appends `(<size> on disk)`.
+
+### Switches
+
+```
+Usage: dirused [target...] [switches]
+
+Targets:
+  . | <rel>           Current or relative path
+  C:\x | c:/x | C:    Local path or drive root
+  \\server\share      UNC share (or //server/share)
+  \\node | //node     All admin shares on a host
+  /all                All local drives, or every drive on each target host
+
+Switches (use /, - or -- in any case):
+  /top <n>            Show top N entries (default: 50)
+  /json               Output JSON (default: text)
+  /csv                Output CSV (default: text)
+  /all                All local drives, or every drive on each target host
+  /file <path>        Read targets from file, one per line (default: none)
+  /summary            Volume usage only, no directory walk (default: off)
+  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)
+  /exact              On-disk sizes and hard-link dedup (slower)
+  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)
+  /parallel <n>       Max concurrent scans, 1-64 (default: 4)
+  /help               Show this help
+
+Exit codes:
+  0  All targets completed
+  1  Usage error or unreadable target file
+  3  Any target incomplete, failed, or timed out
+```
 
 Sample `targets.txt`:
 

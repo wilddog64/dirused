@@ -111,7 +111,7 @@ public class RemoteTargetTests
         Assert.Equal(0, Program.Run(new[] { @"C:\Windows\Web" }, output, error));
         output.GetStringBuilder().Clear();
         Assert.Equal(3, Program.Run(new[] { @"C:\Windows\Web", @"\\nosuchhost-xyz\c$" }, output, error));
-        Assert.Contains("Largest directories", output.ToString()); Assert.Matches(@"UNREACHABLE: \\\\nosuchhost-xyz\\c\$ \((51|53|64|67|1231)\)", output.ToString());
+        Assert.Contains("Web", output.ToString()); Assert.Matches(@"UNREACHABLE: \\\\nosuchhost-xyz\\c\$ \((51|53|64|67|1231)\)", output.ToString());
     }
     [Fact] public void LoopbackMatchesLocalAndCountsHardLinksOnce()
     {
@@ -123,11 +123,12 @@ public class RemoteTargetTests
             string file = Path.Combine(sub, "one"); File.WriteAllBytes(file, new byte[1024 * 1024]); Assert.True(CreateHardLink(Path.Combine(root, "two"), file, IntPtr.Zero));
             using (var p = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{junction}\" \"{sub}\"") { UseShellExecute = false, CreateNoWindow = true })!) { p.WaitForExit(); Assert.Equal(0, p.ExitCode); }
             string unc = @"\\localhost\" + char.ToLowerInvariant(root[0]) + "$" + root[2..];
-            var local = new Scanner().Scan(root); var remote = new Scanner().Scan(unc);
+            var local = new Scanner().Scan(root, exact: true); var remote = new Scanner().Scan(unc, exact: true);
             Assert.True(local.Complete); Assert.True(remote.Complete);
-            Assert.Equal(1024 * 1024, local.Directories.Single(x => x.Path == root).LogicalBytes);
-            Assert.Equal(local.Directories.Single(x => x.Path == root).LogicalBytes, remote.Directories.Single(x => x.Path == unc).LogicalBytes);
-            Assert.Equal(local.Directories.Single(x => x.Path == root).OnDiskBytes, remote.Directories.Single(x => x.Path == unc).OnDiskBytes);
+            string uncSub = @"\\localhost\" + char.ToLowerInvariant(sub[0]) + "$" + sub[2..];
+            Assert.Equal(1024 * 1024, local.Directories.Single(x => x.Path == sub).LogicalBytes);
+            Assert.Equal(local.Directories.Single(x => x.Path == sub).LogicalBytes, remote.Directories.Single(x => x.Path == uncSub).LogicalBytes);
+            Assert.Equal(local.Directories.Single(x => x.Path == sub).OnDiskBytes, remote.Directories.Single(x => x.Path == uncSub).OnDiskBytes);
             Assert.Equal(local.Files.Sum(x => x.LogicalBytes), remote.Files.Sum(x => x.LogicalBytes));
             Assert.Equal(local.Files.Sum(x => x.OnDiskBytes), remote.Files.Sum(x => x.OnDiskBytes));
             Assert.Equal(RunTotals(root), RunTotals(unc));
@@ -152,8 +153,9 @@ public class RemoteTargetTests
         using var output = new StringWriter(); using var error = new StringWriter();
         Assert.Equal(0, Program.Run(new[] { path, "/json" }, output, error));
         using var json = JsonDocument.Parse(output.ToString());
-        var entries = json.RootElement.GetProperty("targets")[0].GetProperty("directories");
-        var root = entries.EnumerateArray().Single(x => x.GetProperty("path").GetString()!.Equals(path.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase));
+        var files = json.RootElement.GetProperty("targets")[0].GetProperty("files");
+        string filePath = Path.Combine(path.Replace('/', '\\'), "file");
+        var root = files.EnumerateArray().Single(x => x.GetProperty("path").GetString()!.Equals(filePath, StringComparison.OrdinalIgnoreCase));
         return (root.GetProperty("logicalBytes").GetInt64(), root.GetProperty("onDiskBytes").GetInt64());
     }
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateHardLink(string name, string existing, IntPtr security);
