@@ -109,6 +109,9 @@ Test-Check 'L11' '/summary with /warn 1 /crit 2 tags the volume [CRIT], prints t
 $r = Invoke-Dirused @('C:\Windows\Web', '/warn', '95')
 Test-Check 'L12' '/warn at or above /crit is rejected as a usage error, exit 1' (($r.rc -eq 1) -and ($r.out -match '/warn must be below /crit')) $r
 
+$r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/warn', '1', '/crit', '2')
+Test-Check 'L13' '/summary lists the top folders of a [CRIT] volume' (($r.rc -eq 4) -and ($r.out -match '(?m)^    \S.*  C:\\Windows\\Web\\')) $r
+
 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 
 if ($Targets) {

@@ -13,7 +13,7 @@ public sealed class JsonRenderer(bool summary = false) : IRenderer
         }
         var (volumes, failed) = SummaryRenderer.Prepare(results);
         var combined = volumes.Concat(failed)
-            .Select(r => r with { Directories = new List<Entry>(), Files = new List<Entry>() })
+            .Select(r => r with { Files = new List<Entry>() })
             .ToList();
         output.WriteLine(JsonSerializer.Serialize(new { summary = true, targets = combined }, jsonOptions));
     }
