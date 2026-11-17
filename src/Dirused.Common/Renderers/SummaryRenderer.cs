@@ -11,6 +11,10 @@ public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = f
             string label = string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive;
             var level = Fullness.For(r, warn, crit);
             Fullness.WriteLine(output, $"{label} used {Format.Size(v.UsedBytes)}, free {Format.Size(v.FreeBytes)}, total {Format.Size(v.TotalBytes)}, {v.PercentUsed:F1}% used{Fullness.Tag(level)}", level, color);
+            var directories = r.Directories.OrderByDescending(e => e.LogicalBytes).ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(TopFolders.Count).ToList();
+            int width = directories.Select(e => Format.Size(e.LogicalBytes).Length).DefaultIfEmpty(0).Max();
+            foreach (var directory in directories) output.WriteLine($"    {Format.Size(directory.LogicalBytes).PadLeft(width)}  {directory.Path}");
+            if (r.TopFoldersNote != null) output.WriteLine($"    top folders incomplete: {r.TopFoldersNote}");
         }
         foreach (var f in failed)
         {

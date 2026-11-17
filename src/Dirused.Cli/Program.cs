@@ -32,6 +32,8 @@ public static class Program
                     : x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() })
                 .Select(x => x with { Level = Fullness.For(x, options.Warn, options.Crit) })
                 .ToList();
+            if (options.Summary && options.Format != OutputFormat.Csv)
+                results = TopFolders.Attach(targets, results, (t, token) => RemoteScan.Scan(byTarget[t], 1, false, token), new RunOptions(options.Parallel, options.Timeout ?? TopFolders.DefaultTimeout), cts.Token).ToList();
             IRenderer renderer = options.Format switch
             {
                 OutputFormat.Json => new JsonRenderer(options.Summary),

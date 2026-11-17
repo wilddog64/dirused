@@ -16,4 +16,6 @@ public record ScanResult(string Target, Volume Volume, List<Entry> Directories, 
     public List<string> SystemOnly { get; init; } = new();
     [System.Text.Json.Serialization.JsonConverter(typeof(Dirused.Common.Renderers.FullnessLevelJsonConverter))]
     public Dirused.Common.Renderers.FullnessLevel? Level { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? TopFoldersNote { get; init; }
 }

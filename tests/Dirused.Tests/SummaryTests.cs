@@ -42,7 +42,7 @@ public sealed class SummaryTests : IDisposable
         Command("icacls.exe", $"\"{denied}\" /deny \"{user}:(OI)(CI)(RX)\"");
         try
         {
-            var summary = Run(root, sub, "/summary");
+            var summary = Run(root, sub, "/summary", "/warn", "99", "/crit", "100");
             Assert.Equal(0, summary.code);
             Assert.DoesNotContain("INCOMPLETE", summary.output);
             // Same volume serial prints once.
@@ -61,7 +61,7 @@ public sealed class SummaryTests : IDisposable
             Assert.StartsWith("kind,target,used_bytes,free_bytes,total_bytes,percent_used,level", csv.output);
 
             // /json has summary: true and empty directories/files.
-            var json = Run(root, "/summary", "/json");
+            var json = Run(root, "/summary", "/json", "/warn", "99", "/crit", "100");
             Assert.Equal(0, json.code);
             using var doc = JsonDocument.Parse(json.output);
             Assert.True(doc.RootElement.GetProperty("summary").GetBoolean());
@@ -74,4 +74,28 @@ public sealed class SummaryTests : IDisposable
             Command("icacls.exe", $"\"{denied}\" /remove:d \"{user}\"");
         }
     }
+    [Fact]
+    public void E3_SummaryListsTopFoldersOfCritVolumeOnly()
+    {
+        foreach (var (name, size) in new[] { ("a", 3 * 1024 * 1024), ("b", 2 * 1024 * 1024), ("c", 1024 * 1024), ("d", 512 * 1024) })
+        {
+            string folder = Path.Combine(root, name);
+            Directory.CreateDirectory(folder);
+            File.WriteAllBytes(Path.Combine(folder, "data.bin"), new byte[size]);
+        }
+        var critical = Run(root, "/summary", "/warn", "1", "/crit", "2");
+        Assert.Equal(4, critical.code);
+        var lines = critical.output.TrimEnd().Split(Environment.NewLine);
+        Assert.EndsWith(" [CRIT]", lines[0]);
+        Assert.EndsWith("\\a", lines[1]);
+        Assert.EndsWith("\\b", lines[2]);
+        Assert.EndsWith("\\c", lines[3]);
+        Assert.DoesNotContain(lines, line => line.EndsWith("\\d", StringComparison.Ordinal));
+        Assert.StartsWith("1 volume(s): ", lines[^1], StringComparison.Ordinal);
+
+        var ok = Run(root, "/summary", "/warn", "99", "/crit", "100");
+        Assert.Equal(0, ok.code);
+        Assert.Equal(2, ok.output.TrimEnd().Split(Environment.NewLine).Length);
+    }
+
 }

@@ -77,7 +77,8 @@ Switches (use /, - or -- in any case):
   /csv                Output CSV (default: text)
   /all                All local drives, or every drive on each target host
   /file <path>        Read targets from file, one per line (default: none)
-  /summary            Volume usage only, no directory walk (default: off)
+  /summary            Volume usage; a /warn or /crit volume also lists
+                      its top 3 folders (default: off)
   /warn <n>           Warning fullness threshold (default: 85)
   /crit <n>           Critical fullness threshold (default: 90)
   /deep [n]           List n directory levels, 1-32 (/deep alone: 2)
@@ -103,6 +104,8 @@ When a scan is stopped by a timeout or cancellation, its errors name the folder 
 If `System Volume Information` at a volume root cannot be read, output labels it `<path>: system only (not counted)`; its usage is included in the volume's used figure.
 
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets.
+
+The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not given) and never affects the exit code.
 
 ## License
 

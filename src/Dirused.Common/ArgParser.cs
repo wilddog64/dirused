@@ -26,7 +26,8 @@ public static class ArgParser
         "  /csv                Output CSV (default: text)\n" +
         "  /all                All local drives, or every drive on each target host\n" +
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
-        "  /summary            Volume usage only, no directory walk (default: off)\n" +
+        "  /summary            Volume usage; a /warn or /crit volume also lists\n" +
+        "                      its top 3 folders (default: off)\n" +
         "  /warn <n>           Warning fullness threshold (default: 85)\n" +
         "  /crit <n>           Critical fullness threshold (default: 90)\n" +
         "  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)\n" +
