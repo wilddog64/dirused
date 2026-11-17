@@ -5,6 +5,11 @@ Each release's section here becomes its GitHub release notes.
 
 ## [Unreleased]
 
+### Changed
+- The `/html` report colours by `/warn` and `/crit`: a volume at or above `/crit` gets a red bar and a red `CRIT`
+  label, one at or above `/warn` a yellow bar and a yellow `WARN` label, and each host's row in the nodes table takes
+  the colour of its fullest volume. Below `/warn` the bar stays blue and the row stays plain.
+
 ## [v0.0.9] - 2026-11-17
 
 ### Added

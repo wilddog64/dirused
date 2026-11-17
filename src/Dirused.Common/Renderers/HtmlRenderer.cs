@@ -13,7 +13,7 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         var (volumes, failed) = SummaryRenderer.Prepare(results);
         output.WriteLine("<!doctype html>");
         output.WriteLine("<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>dirused report</title>");
-        output.WriteLine("<style>:root{font:16px system-ui,sans-serif;color:#202124;background:#fff}body{max-width:1200px;margin:2rem auto;padding:0 1rem}h1{margin-bottom:.2rem}small{color:#666}.scroll{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;width:100%;min-width:680px}th,td{padding:.55rem .7rem;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}th{background:#f2f4f7}td.num{text-align:right;white-space:nowrap}.crit{background:#fee2e2}.warn{background:#fef3c7}.bar{display:inline-block;width:90px;height:.65rem;background:#ddd;border-radius:1rem;margin-left:.5rem;overflow:hidden}.bar>span{display:block;height:100%;background:#4b83d1}section{margin-top:2rem}code{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){:root{color:#eee;background:#171717}small{color:#bbb}th{background:#292929}td,th{border-color:#444}.crit{background:#542b2b}.warn{background:#51451f}.bar{background:#444}.bar>span{background:#8ab4f8}}</style></head><body>");
+        output.WriteLine("<style>:root{font:16px system-ui,sans-serif;color:#202124;background:#fff}body{max-width:1200px;margin:2rem auto;padding:0 1rem}h1{margin-bottom:.2rem}small{color:#666}.scroll{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;width:100%;min-width:680px}th,td{padding:.55rem .7rem;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}th{background:#f2f4f7}td.num{text-align:right;white-space:nowrap}.crit{background:#fee2e2}.warn{background:#fef3c7}.bar{display:inline-block;width:90px;height:.65rem;background:#ddd;border-radius:1rem;margin-left:.5rem;overflow:hidden}.bar>span{display:block;height:100%;background:#4b83d1}.crit .bar>span{background:#d93025}.warn .bar>span{background:#f9ab00}.lvl{font-weight:600;border-radius:.3rem;padding:.1rem .45rem}.crit .lvl{color:#fff;background:#d93025}.warn .lvl{color:#202124;background:#fbbc04}section{margin-top:2rem}code{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){:root{color:#eee;background:#171717}small{color:#bbb}th{background:#292929}td,th{border-color:#444}.crit{background:#542b2b}.warn{background:#51451f}.bar{background:#444}.bar>span{background:#8ab4f8}}</style></head><body>");
         output.WriteLine("<h1>dirused report</h1>");
         output.WriteLine($"<p>Generated {E(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture))} on {E(Environment.MachineName)} · warn {warn}% / crit {crit}%</p>");
 
@@ -28,7 +28,10 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         foreach (var host in hosts)
         {
             string highest = host.Volumes.Count == 0 ? "failed" : host.Volumes.Max(r => r.Volume.PercentUsed).ToString("F1", CultureInfo.InvariantCulture) + "%";
-            output.WriteLine($"<tr><td>{E(host.Host)}</td><td class=\"num\">{host.Volumes.Count}</td><td class=\"num\">{host.Volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Crit)}</td><td class=\"num\">{host.Volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Warn)}</td><td class=\"num\">{E(highest)}</td></tr>");
+            int nodeCrit = host.Volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Crit);
+            int nodeWarn = host.Volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Warn);
+            string nodeCls = nodeCrit > 0 ? " class=\"crit\"" : nodeWarn > 0 ? " class=\"warn\"" : "";
+            output.WriteLine($"<tr{nodeCls}><td>{E(host.Host)}</td><td class=\"num\">{host.Volumes.Count}</td><td class=\"num\">{nodeCrit}</td><td class=\"num\">{nodeWarn}</td><td class=\"num\">{E(highest)}</td></tr>");
         }
         output.WriteLine("</tbody></table></div>");
 
@@ -38,12 +41,13 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
             var v = r.Volume;
             string level = Fullness.For(r, warn, crit) switch { FullnessLevel.Crit => "CRIT", FullnessLevel.Warn => "WARN", _ => "" };
             string cls = level == "" ? "" : $" class=\"{level.ToLowerInvariant()}\"";
+            string levelCell = level == "" ? "" : "<span class=\"lvl\">" + level + "</span>";
             string pct = v.PercentUsed.ToString("F1", CultureInfo.InvariantCulture);
             string bar = Math.Clamp(v.PercentUsed, 0, 100).ToString("0.##", CultureInfo.InvariantCulture);
             var folders = summary
                 ? r.TopFoldersNote != null ? $"incomplete: {E(r.TopFoldersNote)}" : string.Join("<br>", r.Directories.OrderByDescending(e => e.LogicalBytes).ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(TopFolders.Count).Select(e => $"{E(Format.Size(e.LogicalBytes))} {E(e.Path)}"))
                 : "";
-            output.WriteLine($"<tr{cls}><td>{E(Host(r))}</td><td>{E(string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive)}</td><td class=\"num\">{E(Format.Size(v.UsedBytes))}</td><td class=\"num\">{E(Format.Size(v.FreeBytes))}</td><td class=\"num\">{E(Format.Size(v.TotalBytes))}</td><td class=\"num\">{E(pct)}% <span class=\"bar\"><span style=\"width:{bar}%\"></span></span></td><td>{level}</td><td>{folders}</td></tr>");
+            output.WriteLine($"<tr{cls}><td>{E(Host(r))}</td><td>{E(string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive)}</td><td class=\"num\">{E(Format.Size(v.UsedBytes))}</td><td class=\"num\">{E(Format.Size(v.FreeBytes))}</td><td class=\"num\">{E(Format.Size(v.TotalBytes))}</td><td class=\"num\">{E(pct)}% <span class=\"bar\"><span style=\"width:{bar}%\"></span></span></td><td>{levelCell}</td><td>{folders}</td></tr>");
         }
         output.WriteLine("</tbody></table></div>");
 
