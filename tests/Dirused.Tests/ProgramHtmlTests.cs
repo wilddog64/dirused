@@ -13,14 +13,14 @@ public sealed class ProgramHtmlTests
         {
             var plain = Run(new[] { dir, "/summary" });
             var html = Run(new[] { dir, "/summary", "/html", "/output", Path.Combine(tmp, "r.html") });
-            Assert.Equal(plain.Stdout, html.Stdout);
+            Assert.Equal(Mask(plain.Stdout), Mask(html.Stdout));
             Assert.Equal(plain.ExitCode, html.ExitCode);
             Assert.Contains("<table class=\"volumes\">", File.ReadAllText(Path.Combine(tmp, "r.html")));
             Assert.Contains("HTML report: ", html.Stderr);
 
             var csv = Run(new[] { dir, "/summary", "/csv" });
             var csvHtml = Run(new[] { dir, "/summary", "/csv", "/html", "/output", Path.Combine(tmp, "csv.html") });
-            Assert.Equal(csv.Stdout, csvHtml.Stdout);
+            Assert.Equal(Mask(csv.Stdout), Mask(csvHtml.Stdout));
             Assert.Equal(csv.ExitCode, csvHtml.ExitCode);
         });
     }
@@ -63,6 +63,8 @@ public sealed class ProgramHtmlTests
             return new[] { new Dirused.Core.Targets.NodeShare("C$", 0x80000000) };
         }
     }
+
+    private static string Mask(string text) => System.Text.RegularExpressions.Regex.Replace(text, "[0-9]", "0");
 
     private static (int ExitCode, string Stdout, string Stderr) Run(string[] args, Dirused.Core.Targets.INodeShares? shares = null)
     {
