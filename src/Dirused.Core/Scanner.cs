@@ -37,7 +37,7 @@ public sealed class Scanner
         FallbackDirectories = 0;
         string full = Path.GetFullPath(target);
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
-        volumeRoot = root;
+        volumeRoot = Unextended(root);
         var volume = Volumes.VolumeProbe.Probe(root);
         clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
@@ -92,7 +92,7 @@ public sealed class Scanner
                             var child = Walk(display, depth + 1, maxDepth, exact, ct);
                             logical += child.logical;
                             disk += child.disk;
-                            if (depth + 1 <= maxDepth)
+                            if (depth + 1 <= maxDepth && !systemOnly.Contains(display, StringComparer.OrdinalIgnoreCase))
                             {
                                 directories.Add(new Entry(display, child.logical, child.disk));
                             }
@@ -128,7 +128,7 @@ public sealed class Scanner
                             var child = Walk(childPath, depth + 1, maxDepth, exact, ct);
                             logical += child.logical;
                             disk += child.disk;
-                            if (depth + 1 <= maxDepth)
+                            if (depth + 1 <= maxDepth && !systemOnly.Contains(childPath, StringComparer.OrdinalIgnoreCase))
                             {
                                 directories.Add(new Entry(childPath, child.logical, child.disk));
                             }
@@ -167,7 +167,7 @@ public sealed class Scanner
         }
         catch (Exception ex) when (IsScanError(ex))
         {
-            if (IsSystemOnlyDenied(ex, path)) systemOnly.Add(path);
+            if (IsSystemOnlyDenied(ex, path, depth)) systemOnly.Add(path);
             else errors.Add(new ScanError(path, ex.Message));
         }
         return (logical, disk);
@@ -181,10 +181,10 @@ public sealed class Scanner
     }
 
     private static bool IsScanError(Exception ex) => ex is IOException or UnauthorizedAccessException or Win32Exception or System.Security.SecurityException;
-    private bool IsSystemOnlyDenied(Exception ex, string path)
+    private bool IsSystemOnlyDenied(Exception ex, string path, int depth)
     {
         bool denied = ex is UnauthorizedAccessException || ex is Win32Exception win32 && win32.NativeErrorCode == 5;
-        if (!denied || !string.Equals(Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "System Volume Information", StringComparison.OrdinalIgnoreCase)) return false;
+        if (depth <= 0 || !denied || !string.Equals(Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "System Volume Information", StringComparison.OrdinalIgnoreCase)) return false;
         string? parent = Path.GetDirectoryName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         static string TrimSeparators(string value) => value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return parent != null && string.Equals(TrimSeparators(parent), TrimSeparators(volumeRoot), StringComparison.OrdinalIgnoreCase);

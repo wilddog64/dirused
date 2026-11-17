@@ -365,6 +365,62 @@ public sealed class ScannerTests : IDisposable
         Assert.Empty(result.Errors);
         Assert.Equal(new[] { systemPath }, result.SystemOnly);
         Assert.Contains(result.Directories, entry => entry.Path == dataPath);
+        Assert.DoesNotContain(result.Directories, entry => entry.Path == systemPath);
+    }
+
+    [Fact]
+    public void Test_SystemVolumeInformationAsTargetIsStillIncomplete()
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string systemPath = Path.Combine(volumeRoot, "System Volume Information");
+        var scanner = new Scanner(path => path == systemPath
+            ? throw new UnauthorizedAccessException("denied")
+            : throw new InvalidOperationException($"Unexpected path: {path}"));
+
+        var result = scanner.Scan(systemPath);
+
+        Assert.False(result.Complete);
+        Assert.Equal(systemPath, Assert.Single(result.Errors).Path);
+        Assert.Empty(result.SystemOnly);
+    }
+
+    [Fact]
+    public void Test_SystemVolumeInformationExtendedRootIsNotCounted()
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string systemPath = Path.Combine(volumeRoot, "System Volume Information");
+        string extendedRoot = @"\\?\" + volumeRoot;
+        var scanner = new Scanner(path =>
+        {
+            if (path == volumeRoot || path == extendedRoot)
+                return new[] { new DirEntry("System Volume Information", FileAttributes.Directory, 0, 0) };
+            if (path == systemPath) throw new UnauthorizedAccessException("denied");
+            throw new InvalidOperationException($"Unexpected path: {path}");
+        });
+
+        var result = scanner.Scan(extendedRoot);
+
+        Assert.True(result.Complete);
+        Assert.Equal(new[] { systemPath }, result.SystemOnly);
+        Assert.DoesNotContain(result.Directories, entry => entry.Path == systemPath);
+    }
+
+    [Fact]
+    public void Test_SystemVolumeInformationIoErrorIsStillIncomplete()
+    {
+        string volumeRoot = Path.GetPathRoot(root)!;
+        string systemPath = Path.Combine(volumeRoot, "System Volume Information");
+        var scanner = new Scanner(path => path == volumeRoot
+            ? new[] { new DirEntry("System Volume Information", FileAttributes.Directory, 0, 0) }
+            : path == systemPath
+                ? throw new IOException("disk")
+                : throw new InvalidOperationException($"Unexpected path: {path}"));
+
+        var result = scanner.Scan(volumeRoot);
+
+        Assert.False(result.Complete);
+        Assert.Equal(systemPath, Assert.Single(result.Errors).Path);
+        Assert.Empty(result.SystemOnly);
     }
 
     [Fact]
