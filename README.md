@@ -75,6 +75,10 @@ Switches (use /, - or -- in any case):
   /top <n>            Show top N entries (default: 50)
   /json               Output JSON (default: text)
   /csv                Output CSV (default: text)
+  /html               Also write an HTML report
+                      (default file: C:\temp\output.html)
+  /output <path>      Write the report to <path>: the HTML file with /html,
+                      otherwise the text, JSON or CSV output (default: console)
   /all                All local drives, or every drive on each target host
   /file <path>        Read targets from file, one per line (default: none)
   /summary            Volume usage; a /warn or /crit volume also lists

@@ -54,7 +54,7 @@ public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = f
             : $"{host}:drive:{r.Volume.Drive}";
     }
 
-    private static string ExtractHost(string target)
+    internal static string ExtractHost(string target)
     {
         if (string.IsNullOrEmpty(target)) return "";
         string t = target;

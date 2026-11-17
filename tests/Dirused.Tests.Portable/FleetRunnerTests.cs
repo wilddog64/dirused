@@ -210,7 +210,7 @@ public sealed class FleetRunnerTests : IDisposable
         Assert.True(help.Usage);
         string text = ArgParser.UsageText;
 
-        foreach (string required in new[] { "/top", "/json", "/csv", "/all", "/file", "/summary", "/timeout", "/parallel", "//server/share", "c:/" })
+        foreach (string required in new[] { "/top", "/json", "/csv", "/html", "/output", "/all", "/file", "/summary", "/timeout", "/parallel", "//server/share", "c:/" })
             Assert.Contains(required, text);
         Assert.Contains("exit", text, StringComparison.OrdinalIgnoreCase);
 

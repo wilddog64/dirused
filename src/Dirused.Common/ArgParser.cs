@@ -7,8 +7,11 @@ public static class ArgParser
 {
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
-        "               [/top N] [/json|/csv] [/warn [1-100]] [/crit [1-100]]\n" +
+        "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +
+        "               [/warn [1-100]] [/crit [1-100]]\n" +
         "Run dirused /help for more.";
+
+    public const string DefaultHtmlPath = @"C:\temp\output.html";
 
     public const string UsageText =
         "Usage: dirused [target...] [switches]\n" +
@@ -24,6 +27,10 @@ public static class ArgParser
         "  /top <n>            Show top N entries (default: 50)\n" +
         "  /json               Output JSON (default: text)\n" +
         "  /csv                Output CSV (default: text)\n" +
+        "  /html               Also write an HTML report\n" +
+        "                      (default file: C:\\temp\\output.html)\n" +
+        "  /output <path>      Write the report to <path>: the HTML file with /html,\n" +
+        "                      otherwise the text, JSON or CSV output (default: console)\n" +
         "  /all                All local drives, or every drive on each target host\n" +
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
         "  /summary            Volume usage; a /warn or /crit volume also lists\n" +
@@ -57,7 +64,8 @@ public static class ArgParser
 
     public static ParseResult Parse(string[] args)
     {
-        var targets = new List<string>(); int top = 50; bool json = false, csv = false;
+        var targets = new List<string>(); int top = 50; bool json = false, csv = false, html = false;
+        string? output = null;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
         int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
         for (int i = 0; i < args.Length; i++)
@@ -72,6 +80,10 @@ public static class ArgParser
                     case "top": if (++i >= args.Length || !int.TryParse(args[i], out top) || top < 1) return new(Error: "/top requires a positive integer"); break;
                     case "json": json = true; break;
                     case "csv": csv = true; break;
+                    case "html": html = true; break;
+                    case "output":
+                        if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/output requires a path");
+                        output = args[i]; break;
                     case "purge": case "plan": return new(Error: "not available yet (M2)");
                     case "monitor": case "threshold": return new(Error: "not available yet (M3)");
                     case "gui": return new(Error: "not available yet (GUI)");
@@ -126,7 +138,7 @@ public static class ArgParser
                         parallel = p; break;
                     default: return new(Error: $"Unknown switch: {arg}");
                 }
-                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven, warn, crit));
+                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output));
                 if (unavailable != null) return new(Error: unavailable);
             }
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
@@ -144,7 +156,7 @@ public static class ArgParser
         if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
         bool effectiveSummary = summary && !deepGiven && !exact;
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null)));
     }
 
     public static string? RejectUnavailable(Options options) => null;
