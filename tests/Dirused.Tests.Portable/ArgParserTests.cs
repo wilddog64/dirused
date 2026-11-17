@@ -5,6 +5,45 @@ using Xunit;
 namespace Dirused.Tests.Portable;
 public class ArgParserTests
 {
+    [Fact]
+    public void BareWarnAndCritUseDefaultsWithoutConsumingFollowingArguments()
+    {
+        var a1 = ArgParser.Parse(new[] { @"C:\", "/crit", "/warn" });
+        Assert.Null(a1.Error);
+        Assert.Equal(85, a1.Options!.Warn);
+        Assert.Equal(90, a1.Options.Crit);
+        Assert.Equal(new[] { @"C:\" }, a1.Options.Targets);
+
+        string file = Path.Combine(Path.GetTempPath(), "servers.list");
+        File.WriteAllText(file, @"C:\" + Environment.NewLine);
+        try
+        {
+            var a2 = ArgParser.Parse(new[] { "/summary", "/crit", "/warn", "/file", file });
+            Assert.Null(a2.Error);
+            Assert.Equal(85, a2.Options!.Warn);
+            Assert.Equal(90, a2.Options.Crit);
+            Assert.Equal(file, a2.Options.File);
+            Assert.True(a2.Options.Summary);
+        }
+        finally { File.Delete(file); }
+
+        var a3 = ArgParser.Parse(new[] { "/warn", @"C:\" });
+        Assert.Null(a3.Error);
+        Assert.Equal(85, a3.Options!.Warn);
+        Assert.Equal(new[] { @"C:\" }, a3.Options.Targets);
+    }
+
+    [Fact]
+    public void WarnCritNumbersAndValidationRemainSupported()
+    {
+        var a4 = ArgParser.Parse(new[] { "/warn", "70", "/crit", "80", @"C:\" });
+        Assert.Null(a4.Error);
+        Assert.Equal(70, a4.Options!.Warn);
+        Assert.Equal(80, a4.Options.Crit);
+        Assert.Equal("/crit requires an integer between 1 and 100", ArgParser.Parse(new[] { "/crit", "150", @"C:\" }).Error);
+        Assert.Equal("/warn must be below /crit", ArgParser.Parse(new[] { "/crit", "/warn", "95", @"C:\" }).Error);
+    }
+
     [Theory]
     [InlineData("/purge", "not available yet (M2)")]
     [InlineData("/monitor", "not available yet (M3)")]

@@ -12,7 +12,10 @@ public static class TopFolders
     public static IReadOnlyList<ScanResult> Attach(IReadOnlyList<Target> targets, IReadOnlyList<ScanResult> results,
         Func<Target, CancellationToken, ScanResult> scan, RunOptions options, CancellationToken ct)
     {
-        var indices = Enumerable.Range(0, results.Count).Where(i => results[i].Level is FullnessLevel.Warn or FullnessLevel.Crit).ToList();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var indices = Enumerable.Range(0, results.Count)
+            .Where(i => (results[i].Level is FullnessLevel.Warn or FullnessLevel.Crit) && seen.Add(SummaryRenderer.VolumeKey(results[i])))
+            .ToList();
         if (indices.Count == 0) return results;
         var selected = indices.Select(i => targets[i]).ToList();
         var scans = ScanRunner.Run(selected, scan, options, ct);
