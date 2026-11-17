@@ -60,14 +60,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          awk -v tag="$GITHUB_REF_NAME" '
-            index($0, "## [" tag "]") == 1 { on = 1; next }
-            on && /^## \[/ { exit }
-            on { print }
-          ' CHANGELOG.md > notes.md
+          section() {
+            awk -v tag="$1" '
+              index($0, "## [" tag "]") == 1 { on = 1; next }
+              on && /^## \[/ { exit }
+              on { print }
+            ' CHANGELOG.md
+          }
+          section "$GITHUB_REF_NAME" > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::notice::CHANGELOG.md has no section for $GITHUB_REF_NAME; using [Unreleased]"
+            section Unreleased > notes.md
+          fi
           if grep -q '[^[:space:]]' notes.md; then
             gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --prerelease --notes-file notes.md
           else
-            echo "::warning::CHANGELOG.md has no section for $GITHUB_REF_NAME; using generated notes"
+            echo "::warning::CHANGELOG.md has no section for $GITHUB_REF_NAME and [Unreleased] is empty; using generated notes"
             gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --prerelease --generate-notes
           fi

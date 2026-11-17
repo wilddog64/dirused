@@ -1,7 +1,8 @@
 # Changelog
 
 All notable changes to dirused. Versions before 1.0 are pre-releases; switches may still change.
-Each release's section here becomes its GitHub release notes.
+Each release's section here becomes its GitHub release notes. A tag with no section of its own gets the
+`[Unreleased]` section instead, so a release can be tagged without renaming it first.
 
 ## [Unreleased]
 
