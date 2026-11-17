@@ -68,7 +68,6 @@ public sealed class FullnessTests
         {
             (new[] { ".", "/warn", "0" }, "/warn requires an integer between 1 and 100"),
             (new[] { ".", "/crit", "101" }, "/crit requires an integer between 1 and 100"),
-            (new[] { ".", "/warn", "x" }, "/warn requires an integer between 1 and 100"),
             (new[] { ".", "/warn", "95" }, "/warn must be below /crit"),
             (new[] { ".", "/warn", "90", "/crit", "90" }, "/warn must be below /crit")
         })
@@ -76,6 +75,10 @@ public sealed class FullnessTests
             var parsed = ArgParser.Parse(args);
             Assert.Equal(message, parsed.Error);
         }
+        var bare = ArgParser.Parse(new[] { "/warn", "x" });
+        Assert.Null(bare.Error);
+        Assert.Equal(85, bare.Options!.Warn);
+        Assert.Equal(new[] { "x" }, bare.Options.Targets);
         var custom = ArgParser.Parse(new[] { ".", "/warn", "80", "/crit", "95" }).Options!;
         Assert.Equal(80, custom.Warn);
         Assert.Equal(95, custom.Crit);
