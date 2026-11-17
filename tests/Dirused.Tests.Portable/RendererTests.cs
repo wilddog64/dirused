@@ -74,7 +74,8 @@ public class RendererTests
       "errors": [],
       "complete": true,
       "exact": false,
-      "systemOnly": []
+      "systemOnly": [],
+      "level": null
     }
   ]
 }
@@ -188,7 +189,8 @@ public class RendererTests
         using var textOut = new StringWriter();
         new SummaryRenderer().Render(textOut, results);
         var textLines = textOut.ToString().TrimEnd().Split(Environment.NewLine);
-        Assert.Equal(2, textLines.Length);
+        Assert.Equal(3, textLines.Length);
+        Assert.Equal("2 volume(s): 0 at or above 90%, 0 at or above 85%", textLines[^1]);
 
         using var jsonOut = new StringWriter();
         new JsonRenderer(summary: true).Render(jsonOut, results);
@@ -211,13 +213,15 @@ public class RendererTests
         using var textLocal = new StringWriter();
         new SummaryRenderer().Render(textLocal, new[] { local1, local2 });
         var localLines = textLocal.ToString().TrimEnd().Split(Environment.NewLine);
-        Assert.Single(localLines);
+        Assert.Equal(2, localLines.Length);
+        Assert.Equal("1 volume(s): 0 at or above 90%, 0 at or above 85%", localLines[^1]);
 
         var remoteUpper = new ScanResult(@"\\A\d$", new Volume(@"\\A\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x8888 }, new(), new(), new(), true);
         var remoteLower = new ScanResult(@"\\a\d$", new Volume(@"\\a\d$\", 1000, 1000, 2000, 50.0) { SerialNumber = 0x8888 }, new(), new(), new(), true);
         using var textRemote = new StringWriter();
         new SummaryRenderer().Render(textRemote, new[] { remoteUpper, remoteLower });
         var remoteLines = textRemote.ToString().TrimEnd().Split(Environment.NewLine);
-        Assert.Single(remoteLines);
+        Assert.Equal(2, remoteLines.Length);
+        Assert.Equal("1 volume(s): 0 at or above 90%, 0 at or above 85%", remoteLines[^1]);
     }
 }

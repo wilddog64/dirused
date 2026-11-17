@@ -7,7 +7,7 @@ public static class ArgParser
 {
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
-        "               [/top N] [/json|/csv]\n" +
+        "               [/top N] [/json|/csv] [/warn <1-100>] [/crit <1-100>]\n" +
         "Run dirused /help for more.";
 
     public const string UsageText =
@@ -27,6 +27,8 @@ public static class ArgParser
         "  /all                All local drives, or every drive on each target host\n" +
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
         "  /summary            Volume usage only, no directory walk (default: off)\n" +
+        "  /warn <n>           Warning fullness threshold (default: 85)\n" +
+        "  /crit <n>           Critical fullness threshold (default: 90)\n" +
         "  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)\n" +
         "  /exact              On-disk sizes and hard-link dedup (slower)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
@@ -36,7 +38,8 @@ public static class ArgParser
         "Exit codes:\n" +
         "  0  All targets completed\n" +
         "  1  Usage error or unreadable target file\n" +
-        "  3  Any target incomplete, failed, or timed out";
+        "  3  Any target incomplete, failed, or timed out\n" +
+        "  4  Any volume at or above /crit (takes precedence over 3)";
 
     public const string MultiTargetWarning =
         "dirused: /deep and /exact walk every target in full; add /timeout <n> to bound each one, or use /summary for a quick fleet check";
@@ -55,7 +58,7 @@ public static class ArgParser
     {
         var targets = new List<string>(); int top = 50; bool json = false, csv = false;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
-        int deep = 1; bool deepGiven = false; bool exact = false;
+        int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -76,6 +79,12 @@ public static class ArgParser
                         if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i])) return new(Error: "/file requires a path");
                         file = args[i]; break;
                     case "summary": summary = true; break;
+                    case "warn":
+                        if (++i >= args.Length || !int.TryParse(args[i], out warn) || warn < 1 || warn > 100) return new(Error: "/warn requires an integer between 1 and 100");
+                        break;
+                    case "crit":
+                        if (++i >= args.Length || !int.TryParse(args[i], out crit) || crit < 1 || crit > 100) return new(Error: "/crit requires an integer between 1 and 100");
+                        break;
                     case "deep":
                         deepGiven = true;
                         if (i + 1 < args.Length)
@@ -110,7 +119,7 @@ public static class ArgParser
                         parallel = p; break;
                     default: return new(Error: $"Unknown switch: {arg}");
                 }
-                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven));
+                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven, warn, crit));
                 if (unavailable != null) return new(Error: unavailable);
             }
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
@@ -125,9 +134,10 @@ public static class ArgParser
                 targets.Add(ft);
             }
         }
+        if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
         bool effectiveSummary = summary && !deepGiven && !exact;
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit));
     }
 
     public static string? RejectUnavailable(Options options) => null;

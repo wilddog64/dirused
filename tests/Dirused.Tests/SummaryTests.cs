@@ -57,7 +57,7 @@ public sealed class SummaryTests : IDisposable
             // /csv header as documented.
             var csv = Run(root, "/summary", "/csv");
             Assert.Equal(0, csv.code);
-            Assert.StartsWith("kind,target,used_bytes,free_bytes,total_bytes,percent_used", csv.output);
+            Assert.StartsWith("kind,target,used_bytes,free_bytes,total_bytes,percent_used,level", csv.output);
 
             // /json has summary: true and empty directories/files.
             var json = Run(root, "/summary", "/json");

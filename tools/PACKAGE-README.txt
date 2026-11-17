@@ -31,6 +31,7 @@ Exit codes
   1  usage error or unreadable target file
   3  at least one target incomplete, failed or timed out
      (the others still report)
+  4  at least one volume at or above /crit; takes precedence over 3
 
 Live checks
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1

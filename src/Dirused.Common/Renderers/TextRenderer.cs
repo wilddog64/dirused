@@ -1,6 +1,6 @@
 using Dirused.Core;
 namespace Dirused.Common.Renderers;
-public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleWidth = null) : IRenderer
+public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleWidth = null, int warn = 85, int crit = 90, bool color = false) : IRenderer
 {
     public void Render(TextWriter output, IReadOnlyList<ScanResult> results)
     {
@@ -21,7 +21,8 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
         foreach (var r in results)
         {
             var v = r.Volume;
-            output.WriteLine($"{v.Drive}  used {Format.Short(v.UsedBytes)}, free {Format.Short(v.FreeBytes)}, total {Format.Short(v.TotalBytes)}, {v.PercentUsed:F1}% used");
+            var level = Fullness.For(r, warn, crit);
+            Fullness.WriteLine(output, $"{v.Drive}  used {Format.Short(v.UsedBytes)}, free {Format.Short(v.FreeBytes)}, total {Format.Short(v.TotalBytes)}, {v.PercentUsed:F1}% used{Fullness.Tag(level)}", level, color);
 
             var rows = r.Directories.Concat(r.Files)
                 .OrderByDescending(x => x.LogicalBytes)
