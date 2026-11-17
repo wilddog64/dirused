@@ -68,6 +68,24 @@ public class ArgParserTests
     }
 
     [Fact]
+    public void HtmlAndOutputSwitches()
+    {
+        var a = ArgParser.Parse(new[] { @"C:\", "/html" }).Options!;
+        Assert.True(a.Html);
+        Assert.Equal(ArgParser.DefaultHtmlPath, a.Output);
+        Assert.Equal("r.html", ArgParser.Parse(new[] { @"C:\", "/html", "/output", "r.html" }).Options!.Output);
+        Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output" }).Error);
+        Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output", "" }).Error);
+        var json = ArgParser.Parse(new[] { @"C:\", "/json", "/output", "x.json" }).Options!;
+        Assert.Equal(OutputFormat.Json, json.Format);
+        Assert.False(json.Html);
+        Assert.Equal("x.json", json.Output);
+        var plain = ArgParser.Parse(new[] { @"C:\" }).Options!;
+        Assert.False(plain.Html);
+        Assert.Null(plain.Output);
+    }
+
+    [Fact]
     public void RunnerPreservesOrder()
     {
         var targets = new[] { TargetParser.Parse(".")!, TargetParser.Parse(@"C:\")! };

@@ -115,6 +115,13 @@ Test-Check 'L13' '/summary lists the top folders of a [CRIT] volume' (($r.rc -eq
 $r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/crit', '/warn')
 Test-Check 'L14' 'bare /warn and /crit use defaults 85 and 90' (($r.rc -in 0,4) -and ($r.out -match '1 volume\(s\): \d+ at or above 90%, \d+ at or above 85%')) $r
 
+$htmlDir = Join-Path $env:TEMP 'dirused-l15'
+Remove-Item -LiteralPath $htmlDir -Recurse -Force -ErrorAction SilentlyContinue
+$htmlPath = Join-Path $htmlDir 'report.html'
+$r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/html', '/output', $htmlPath)
+$htmlOk = (Test-Path -LiteralPath $htmlPath) -and ((Get-Content -LiteralPath $htmlPath -Raw) -match '<table class="volumes">')
+Test-Check 'L15' '/summary /html writes a volumes table report' (($r.rc -in 0,4) -and $htmlOk -and ($r.out -match 'HTML report: ')) $r
+
 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 
 if ($Targets) {
