@@ -113,7 +113,7 @@ public sealed class Scanner
                 foreach (var entry in entries!)
                 {
                     if (ct.IsCancellationRequested) break;
-                    string childPath = Path.Combine(path, entry.Name);
+                    string childPath = Unextended(Path.Combine(path, entry.Name));
                     try
                     {
                         var attributes = entry.Attributes;

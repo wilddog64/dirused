@@ -131,6 +131,8 @@ public class RemoteTargetTests
             Assert.Equal(localExact.Directories.Single(x => x.Path == sub).OnDiskBytes, remoteExact.Directories.Single(x => x.Path == uncSub).OnDiskBytes);
             Assert.Equal(localExact.Files.Sum(x => x.LogicalBytes), remoteExact.Files.Sum(x => x.LogicalBytes));
             Assert.Equal(localExact.Files.Sum(x => x.OnDiskBytes), remoteExact.Files.Sum(x => x.OnDiskBytes));
+            Assert.Equal(1024 * 1024, localExact.Directories.Sum(x => x.LogicalBytes) + localExact.Files.Sum(x => x.LogicalBytes));
+            Assert.Equal(1024 * 1024, remoteExact.Directories.Sum(x => x.LogicalBytes) + remoteExact.Files.Sum(x => x.LogicalBytes));
 
             var localDefault = new Scanner().Scan(root, exact: false); var remoteDefault = new Scanner().Scan(unc, exact: false);
             Assert.True(localDefault.Complete); Assert.True(remoteDefault.Complete);
