@@ -11,6 +11,7 @@ public sealed class Scanner
     private readonly List<ScanError> errors = new();
     private readonly Func<string, IReadOnlyList<DirEntry>> reader;
     private long clusterSize;
+    private bool stopReported;
 
     public long PerFileCalls { get; private set; }
     public long FallbackDirectories { get; private set; }
@@ -29,6 +30,7 @@ public sealed class Scanner
     public ScanResult Scan(string target, int deep = 1, bool exact = false, CancellationToken ct = default)
     {
         seen.Clear(); directories.Clear(); files.Clear(); errors.Clear();
+        stopReported = false;
         PerFileCalls = 0;
         FallbackDirectories = 0;
         string full = Path.GetFullPath(target);
@@ -76,7 +78,7 @@ public sealed class Scanner
                 var info = new DirectoryInfo(Extended(path));
                 foreach (var entry in info.EnumerateFileSystemInfos())
                 {
-                    if (ct.IsCancellationRequested) break;
+                    if (ct.IsCancellationRequested) { ReportStop(path); break; }
                     string display = Unextended(entry.FullName);
                     try
                     {
@@ -112,7 +114,7 @@ public sealed class Scanner
             {
                 foreach (var entry in entries!)
                 {
-                    if (ct.IsCancellationRequested) break;
+                    if (ct.IsCancellationRequested) { ReportStop(path); break; }
                     string childPath = Unextended(Path.Combine(path, entry.Name));
                     try
                     {
@@ -161,6 +163,13 @@ public sealed class Scanner
         }
         catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(path, ex.Message)); }
         return (logical, disk);
+    }
+
+    private void ReportStop(string path)
+    {
+        if (stopReported) return;
+        errors.Add(new ScanError(path, "not finished: scan stopped"));
+        stopReported = true;
     }
 
     private static bool IsScanError(Exception ex) => ex is IOException or UnauthorizedAccessException or Win32Exception or System.Security.SecurityException;

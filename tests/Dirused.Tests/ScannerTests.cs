@@ -220,6 +220,40 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public void Test_StoppedScanNamesFolderInProgress()
+    {
+        string a = PathIn("a");
+        string deep = Path.Combine(a, "deep");
+        string b = PathIn("b");
+        using var cts = new CancellationTokenSource();
+        var scanner = new Scanner(path =>
+        {
+            if (path == root) return new[] { new DirEntry("a", FileAttributes.Directory, 0, 0), new DirEntry("b", FileAttributes.Directory, 0, 0) };
+            if (path == a) return new[] { new DirEntry("deep", FileAttributes.Directory, 0, 0), new DirEntry("later", FileAttributes.Directory, 0, 0) };
+            Assert.Equal(deep, path);
+            cts.Cancel();
+            return new[] { new DirEntry("file", FileAttributes.Normal, 1, 0) };
+        });
+
+        var result = scanner.Scan(root, ct: cts.Token);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(deep, error.Path);
+        Assert.Equal("not finished: scan stopped", error.Reason);
+        Assert.DoesNotContain(result.Errors, e => e.Path == b);
+    }
+
+    [Fact]
+    public void Test_CancelledBeforeStartNamesNothingExtra()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var scanner = new Scanner(_ => throw new InvalidOperationException("Reader must not run."));
+
+        var result = scanner.Scan(root, ct: cts.Token);
+        Assert.DoesNotContain(result.Errors, e => e.Reason == "not finished: scan stopped");
+    }
+
+    [Fact]
     public void Test_FallbackWhenListingRejected()
     {
         string tree = PathIn("fallback_tree");

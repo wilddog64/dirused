@@ -96,6 +96,8 @@ Sample `targets.txt`:
     C:\
     \\server\share
 
+When a scan is stopped by a timeout or cancellation, its errors name the folder in progress as `<path>: not finished: scan stopped`.
+
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
 
 ## License
