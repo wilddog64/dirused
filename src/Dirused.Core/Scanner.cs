@@ -1,18 +1,28 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 
 namespace Dirused.Core;
 
 public sealed class Scanner
 {
-    private readonly HashSet<(uint, ulong)> seen = new();
+    private readonly HashSet<ulong> seen = new();
     private readonly List<Entry> directories = new();
     private readonly List<Entry> files = new();
     private readonly List<ScanError> errors = new();
+    private readonly Func<string, IReadOnlyList<DirEntry>> reader;
     private long clusterSize;
 
     public long PerFileCalls { get; private set; }
+    public long FallbackDirectories { get; private set; }
+
+    public Scanner() : this(DirectoryReader.Read)
+    {
+    }
+
+    internal Scanner(Func<string, IReadOnlyList<DirEntry>> reader)
+    {
+        this.reader = reader;
+    }
 
     public ScanResult Scan(string target, CancellationToken ct) => Scan(target, 1, false, ct);
 
@@ -20,6 +30,7 @@ public sealed class Scanner
     {
         seen.Clear(); directories.Clear(); files.Clear(); errors.Clear();
         PerFileCalls = 0;
+        FallbackDirectories = 0;
         string full = Path.GetFullPath(target);
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
         var volume = Volumes.VolumeProbe.Probe(root);
@@ -42,52 +53,110 @@ public sealed class Scanner
         long logical = 0, disk = 0;
         try
         {
-            var info = new DirectoryInfo(Extended(path));
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return (0, 0);
-            foreach (var entry in info.EnumerateFileSystemInfos())
+            if (depth == 0)
             {
-                if (ct.IsCancellationRequested) break;
-                string display = Unextended(entry.FullName);
-                try
+                var rootInfo = new DirectoryInfo(Extended(path));
+                if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0) return (0, 0);
+            }
+
+            IReadOnlyList<DirEntry>? entries = null;
+            bool fallback = false;
+            try
+            {
+                entries = reader(path);
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode is 87 or 1 or 50)
+            {
+                fallback = true;
+                FallbackDirectories++;
+            }
+
+            if (fallback)
+            {
+                var info = new DirectoryInfo(Extended(path));
+                foreach (var entry in info.EnumerateFileSystemInfos())
                 {
-                    var attributes = entry.Attributes;
-                    if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
-                    if ((attributes & FileAttributes.Directory) != 0)
+                    if (ct.IsCancellationRequested) break;
+                    string display = Unextended(entry.FullName);
+                    try
                     {
-                        var child = Walk(display, depth + 1, maxDepth, exact, ct);
-                        logical += child.logical;
-                        disk += child.disk;
-                        if (depth + 1 <= maxDepth)
+                        var attributes = entry.Attributes;
+                        if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        if ((attributes & FileAttributes.Directory) != 0)
                         {
-                            directories.Add(new Entry(display, child.logical, child.disk));
-                        }
-                    }
-                    else
-                    {
-                        long length = ((FileInfo)entry).Length;
-                        long countedLength;
-                        long allocated;
-                        if (exact)
-                        {
-                            bool placeholder = ((uint)attributes & (0x00400000u | 0x00040000u | 0x1000u)) != 0;
-                            bool duplicate = !placeholder && !Remember(entry.FullName);
-                            allocated = duplicate ? 0 : Allocated(entry.FullName);
-                            countedLength = duplicate ? 0 : length;
+                            var child = Walk(display, depth + 1, maxDepth, exact, ct);
+                            logical += child.logical;
+                            disk += child.disk;
+                            if (depth + 1 <= maxDepth)
+                            {
+                                directories.Add(new Entry(display, child.logical, child.disk));
+                            }
                         }
                         else
                         {
-                            countedLength = length;
-                            allocated = RoundToCluster(length);
+                            long length = ((FileInfo)entry).Length;
+                            long countedLength = length;
+                            long allocated = exact ? Allocated(entry.FullName) : RoundToCluster(length);
+                            if (depth + 1 <= maxDepth)
+                            {
+                                files.Add(new Entry(display, countedLength, allocated));
+                            }
+                            logical += countedLength;
+                            disk += allocated;
                         }
-                        if (depth + 1 <= maxDepth)
-                        {
-                            files.Add(new Entry(display, countedLength, allocated));
-                        }
-                        logical += countedLength;
-                        disk += allocated;
                     }
+                    catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(display, ex.Message)); }
                 }
-                catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(display, ex.Message)); }
+            }
+            else
+            {
+                foreach (var entry in entries!)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    string childPath = Unextended(Path.Combine(path, entry.Name));
+                    try
+                    {
+                        var attributes = entry.Attributes;
+                        if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        if ((attributes & FileAttributes.Directory) != 0)
+                        {
+                            var child = Walk(childPath, depth + 1, maxDepth, exact, ct);
+                            logical += child.logical;
+                            disk += child.disk;
+                            if (depth + 1 <= maxDepth)
+                            {
+                                directories.Add(new Entry(childPath, child.logical, child.disk));
+                            }
+                        }
+                        else
+                        {
+                            long length = entry.EndOfFile;
+                            bool placeholder = ((uint)attributes & (0x00400000u | 0x00040000u | 0x1000u)) != 0;
+                            bool hasId = entry.FileId != 0 && entry.FileId != ulong.MaxValue;
+                            bool duplicate = !placeholder && hasId && !seen.Add(entry.FileId);
+                            long countedLength;
+                            long allocated;
+                            if (duplicate)
+                            {
+                                countedLength = 0;
+                                allocated = 0;
+                            }
+                            else
+                            {
+                                countedLength = length;
+                                allocated = exact ? Allocated(childPath) : RoundToCluster(length);
+                            }
+
+                            if (depth + 1 <= maxDepth)
+                            {
+                                files.Add(new Entry(childPath, countedLength, allocated));
+                            }
+                            logical += countedLength;
+                            disk += allocated;
+                        }
+                    }
+                    catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(childPath, ex.Message)); }
+                }
             }
         }
         catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(path, ex.Message)); }
@@ -102,18 +171,10 @@ public sealed class Scanner
     {
         PerFileCalls++;
         Marshal.SetLastPInvokeError(0);
-        uint low = Native.Kernel32.GetCompressedFileSize(path, out uint high);
+        uint low = Native.Kernel32.GetCompressedFileSize(Extended(path), out uint high);
         int error = Marshal.GetLastPInvokeError();
         if (low == uint.MaxValue && error != 0) throw new Win32Exception(error);
         long size = checked((long)(((ulong)high << 32) | low));
         return RoundToCluster(size);
-    }
-    private bool Remember(string path)
-    {
-        PerFileCalls++;
-        using SafeFileHandle handle = Native.Kernel32.CreateFile(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
-        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (!Native.Kernel32.GetFileInformationByHandle(handle, out var info)) throw new Win32Exception(Marshal.GetLastWin32Error());
-        return seen.Add((info.VolumeSerialNumber, ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow));
     }
 }
