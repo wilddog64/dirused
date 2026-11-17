@@ -3,7 +3,8 @@ using Dirused.Core.Volumes;
 namespace Dirused.Core.Targets;
 public static class RemoteScan
 {
-    public static ScanResult Scan(ResolvedTarget resolved, CancellationToken ct = default) => Scan(resolved, path => new Scanner().Scan(path, ct));
+    public static ScanResult Scan(ResolvedTarget resolved, CancellationToken ct = default) => Scan(resolved, 1, false, ct);
+    public static ScanResult Scan(ResolvedTarget resolved, int deep, bool exact, CancellationToken ct = default) => Scan(resolved, path => new Scanner().Scan(path, deep, exact, ct));
     public static ScanResult Scan(ResolvedTarget resolved, Func<string, ScanResult> scan)
     {
         var target = resolved.Target;

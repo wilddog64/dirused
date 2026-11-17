@@ -6,7 +6,8 @@ namespace Dirused.Common;
 public static class ArgParser
 {
     public const string ShortUsageText =
-        "Usage: dirused <target>... [/file <path>] [/summary] [/top N] [/json|/csv]\n" +
+        "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
+        "               [/top N] [/json|/csv]\n" +
         "Run dirused /help for more.";
 
     public const string UsageText =
@@ -26,6 +27,8 @@ public static class ArgParser
         "  /all                All local drives, or every drive on each target host\n" +
         "  /file <path>        Read targets from file, one per line (default: none)\n" +
         "  /summary            Volume usage only, no directory walk (default: off)\n" +
+        "  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)\n" +
+        "  /exact              On-disk sizes and hard-link dedup (slower)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
         "  /parallel <n>       Max concurrent scans, 1-64 (default: 4)\n" +
         "  /help               Show this help\n" +
@@ -35,10 +38,24 @@ public static class ArgParser
         "  1  Usage error or unreadable target file\n" +
         "  3  Any target incomplete, failed, or timed out";
 
+    public const string MultiTargetWarning =
+        "dirused: /deep and /exact walk every target in full; add /timeout <n> to bound each one, or use /summary for a quick fleet check";
+
+    public static bool WarnIfMultiTarget(int targetCount, Options options, TextWriter error)
+    {
+        if (targetCount > 1 && (options.DeepGiven || options.Exact) && options.Timeout == null)
+        {
+            error.WriteLine(MultiTargetWarning);
+            return true;
+        }
+        return false;
+    }
+
     public static ParseResult Parse(string[] args)
     {
         var targets = new List<string>(); int top = 50; bool json = false, csv = false;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
+        int deep = 1; bool deepGiven = false; bool exact = false;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -59,6 +76,30 @@ public static class ArgParser
                         if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i])) return new(Error: "/file requires a path");
                         file = args[i]; break;
                     case "summary": summary = true; break;
+                    case "deep":
+                        deepGiven = true;
+                        if (i + 1 < args.Length)
+                        {
+                            string next = args[i + 1];
+                            if (next.Length > 0 && next.All(char.IsAsciiDigit))
+                            {
+                                i++;
+                                if (int.TryParse(next, out var d) && d >= 1 && d <= 32)
+                                    deep = d;
+                                else
+                                    return new(Error: "/deep level must be an integer between 1 and 32");
+                            }
+                            else
+                            {
+                                deep = 2;
+                            }
+                        }
+                        else
+                        {
+                            deep = 2;
+                        }
+                        break;
+                    case "exact": exact = true; break;
                     case "timeout":
                         if (++i >= args.Length || !TryParseTimeout(args[i], out var t))
                             return new(Error: "/timeout requires a positive duration (e.g. 30, 30s, 5m, 1h)");
@@ -69,7 +110,7 @@ public static class ArgParser
                         parallel = p; break;
                     default: return new(Error: $"Unknown switch: {arg}");
                 }
-                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary, timeout, parallel));
+                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven));
                 if (unavailable != null) return new(Error: unavailable);
             }
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
@@ -85,7 +126,8 @@ public static class ArgParser
             }
         }
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, summary, timeout, parallel));
+        bool effectiveSummary = summary && !deepGiven && !exact;
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven));
     }
 
     public static string? RejectUnavailable(Options options) => null;

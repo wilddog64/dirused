@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Dirused.Cli;
+using Dirused.Common.Renderers;
 using Dirused.Core;
 using Dirused.Core.Volumes;
 using Xunit;
@@ -26,9 +27,9 @@ public class OutputCompatTests
                 using var expected = new StringWriter();
                 if (flag == "/json") expected.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { targets = new[] { scan } }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase, WriteIndented = true }));
                 else if (flag == "/csv") { expected.WriteLine("kind,target,path,logical_bytes,on_disk_bytes"); foreach (var e in scan.Directories) Row(expected, "directory", root, e); foreach (var e in scan.Files) Row(expected, "file", root, e); }
-                else { var v = scan.Volume; expected.WriteLine($"{v.Drive} used {Size(v.UsedBytes)}, free {Size(v.FreeBytes)}, total {Size(v.TotalBytes)}, {v.PercentUsed:F1}% used"); expected.WriteLine("Largest directories"); foreach (var e in scan.Directories) Print(expected, e); expected.WriteLine("Largest files"); foreach (var e in scan.Files) Print(expected, e); }
+                else { new TextRenderer().Render(expected, new[] { scan }); }
                 // Free space can change between the two scans; compare volume-independent output.
-                if (flag == "") Assert.Equal(expected.ToString().Substring(expected.ToString().IndexOf("Largest directories", StringComparison.Ordinal)), output.ToString().Substring(output.ToString().IndexOf("Largest directories", StringComparison.Ordinal)));
+                if (flag == "") Assert.Equal(expected.ToString().Substring(expected.ToString().IndexOf(Environment.NewLine, StringComparison.Ordinal)), output.ToString().Substring(output.ToString().IndexOf(Environment.NewLine, StringComparison.Ordinal)));
                 else if (flag == "/json") { var a = System.Text.Json.Nodes.JsonNode.Parse(expected.ToString())!; var b = System.Text.Json.Nodes.JsonNode.Parse(output.ToString())!; b["targets"]![0]!["volume"] = a["targets"]![0]!["volume"]!.DeepClone(); Assert.Equal(a.ToJsonString(), b.ToJsonString()); }
                 else Assert.Equal(expected.ToString(), output.ToString());
             }
@@ -42,8 +43,6 @@ public class OutputCompatTests
         Assert.True(Math.Abs(local.FreeBytes - unc.FreeBytes) <= local.TotalBytes / 100);
         Assert.Contains(Assert.Throws<VolumeProbeException>(() => VolumeProbe.Probe(@"\\nosuchhost-xyz\c$\")).NativeErrorCode, new[] { 51, 53, 64, 67, 1231 });
     }
-    private static string Size(long n) { string[] u = { "B", "KB", "MB", "GB", "TB", "PB" }; double v = n; int i = 0; while (v >= 1024 && i < u.Length - 1) { v /= 1024; i++; } return $"{v:F1} {u[i]}"; }
-    private static void Print(TextWriter w, Entry e) => w.WriteLine($"{e.Path}  logical {Size(e.LogicalBytes)}  on disk {Size(e.OnDiskBytes)}");
     private static void Row(TextWriter w, string kind, string target, Entry e) => w.WriteLine($"{kind},\"{target.Replace("\"", "\"\"")}\",\"{e.Path.Replace("\"", "\"\"")}\",{e.LogicalBytes},{e.OnDiskBytes}");
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateHardLink(string newName, string existingName, IntPtr security);
 }

@@ -20,18 +20,22 @@ public static class Program
         {
             var resolved = TargetResolver.ResolveDetailed(options.Targets, nodeShares);
             var targets = resolved.Select(x => x.Target).ToList();
+            ArgParser.WarnIfMultiTarget(targets.Count, options, error);
             var byTarget = new Dictionary<Dirused.Common.Targets.Target, ResolvedTarget>(ReferenceEqualityComparer.Instance);
             foreach (var item in resolved) byTarget.TryAdd(item.Target, item);
             Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
                 ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
-                : (target, token) => RemoteScan.Scan(byTarget[target], token);
+                : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token);
             var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
-                .Select(x => x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() }).ToList();
+                .Select(x => options.Format == OutputFormat.Text
+                    ? x.Result
+                    : x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() })
+                .ToList();
             IRenderer renderer = options.Format switch
             {
                 OutputFormat.Json => new JsonRenderer(options.Summary),
                 OutputFormat.Csv => new CsvRenderer(options.Summary),
-                _ => options.Summary ? new SummaryRenderer() : new TextRenderer()
+                _ => options.Summary ? new SummaryRenderer() : new TextRenderer(options.Top, options.Exact)
             };
             if (options.Format == OutputFormat.Text && !options.Summary)
             {
@@ -61,6 +65,6 @@ public static class Program
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
         if (!Path.EndsInDirectorySeparator(root)) root += Path.DirectorySeparatorChar;
         var volume = Dirused.Core.Volumes.VolumeProbe.Probe(root);
-        return new ScanResult(full, volume, new List<Entry>(), new List<Entry>(), new List<ScanError>(), true);
+        return new ScanResult(full, volume, new List<Entry>(), new List<Entry>(), new List<ScanError>(), true, false);
     }
 }
