@@ -5,6 +5,23 @@ Each release's section here becomes its GitHub release notes.
 
 ## [Unreleased]
 
+## [v0.0.9] - 2026-11-17
+
+### Added
+- `/html` also writes an HTML report; console output is unchanged. The report has a nodes table (one row per host,
+  worst first, with crit and warn counts), a volumes table with a Host column and a bar per volume, and a table of
+  targets that failed. It needs no internet access and works in any browser.
+- `/output <path>` picks where the report goes. With `/html` the default is `C:\temp\output.html`; the folder is
+  created and the file is overwritten each run. Without `/html`, `/output` sends the text, JSON or CSV output to the
+  file instead of the console. stderr names the file: `HTML report: <path>` or `Report: <path>`.
+- live-check `L15`: `/html` and `/output`. The package README lists L1-L15.
+
+### Notes
+- A path that cannot be written stops dirused with exit 1 before any scan: `Cannot write report '<path>': <reason>`.
+- `/output` needs a path. `/output` on its own, or followed by another switch (`/output /html`), fails with
+  `/output requires a path`.
+- Server names that differ only in case (`\\srv1` and `\\SRV1`) share one row in the nodes table.
+
 ## [v0.0.8] - 2026-11-17
 
 ### Changed
