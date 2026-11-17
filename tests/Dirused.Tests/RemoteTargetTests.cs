@@ -153,10 +153,9 @@ public class RemoteTargetTests
         using var output = new StringWriter(); using var error = new StringWriter();
         Assert.Equal(0, Program.Run(new[] { path, "/json" }, output, error));
         using var json = JsonDocument.Parse(output.ToString());
-        var files = json.RootElement.GetProperty("targets")[0].GetProperty("files");
-        string filePath = Path.Combine(path.Replace('/', '\\'), "file");
-        var root = files.EnumerateArray().Single(x => x.GetProperty("path").GetString()!.Equals(filePath, StringComparison.OrdinalIgnoreCase));
-        return (root.GetProperty("logicalBytes").GetInt64(), root.GetProperty("onDiskBytes").GetInt64());
+        var target = json.RootElement.GetProperty("targets")[0];
+        var top = target.GetProperty("directories").EnumerateArray().Concat(target.GetProperty("files").EnumerateArray()).ToList();
+        return (top.Sum(x => x.GetProperty("logicalBytes").GetInt64()), top.Sum(x => x.GetProperty("onDiskBytes").GetInt64()));
     }
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateHardLink(string name, string existing, IntPtr security);
 }
