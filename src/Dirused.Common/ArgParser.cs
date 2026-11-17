@@ -82,7 +82,7 @@ public static class ArgParser
                     case "csv": csv = true; break;
                     case "html": html = true; break;
                     case "output":
-                        if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i])) return new(Error: "/output requires a path");
+                        if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/output requires a path");
                         output = args[i]; break;
                     case "purge": case "plan": return new(Error: "not available yet (M2)");
                     case "monitor": case "threshold": return new(Error: "not available yet (M3)");

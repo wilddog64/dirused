@@ -45,18 +45,30 @@ public sealed class ProgramHtmlTests
         {
             string parent = Path.Combine(tmp, "afile");
             File.WriteAllText(parent, "file");
-            var result = Run(new[] { dir, "/html", "/output", Path.Combine(parent, "r.html") });
+            var shares = new RecordingShares();
+            var result = Run(new[] { dir, @"\\node1", "/html", "/output", Path.Combine(parent, "r.html") }, shares);
             Assert.Equal(1, result.ExitCode);
             Assert.StartsWith("Cannot write report", result.Stderr);
             Assert.Equal("", result.Stdout);
+            Assert.Equal(0, shares.Calls);
         });
     }
 
-    private static (int ExitCode, string Stdout, string Stderr) Run(string[] args)
+    private sealed class RecordingShares : Dirused.Core.Targets.INodeShares
+    {
+        public int Calls;
+        public IEnumerable<Dirused.Core.Targets.NodeShare> Enumerate(string node)
+        {
+            Calls++;
+            return new[] { new Dirused.Core.Targets.NodeShare("C$", 0x80000000) };
+        }
+    }
+
+    private static (int ExitCode, string Stdout, string Stderr) Run(string[] args, Dirused.Core.Targets.INodeShares? shares = null)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
-        int code = Program.Run(args, output, error);
+        int code = Program.Run(args, output, error, shares);
         return (code, output.ToString(), error.ToString());
     }
 

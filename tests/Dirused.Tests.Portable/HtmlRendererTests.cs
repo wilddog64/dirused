@@ -11,7 +11,7 @@ public sealed class HtmlRendererTests
     {
         var results = new[]
         {
-            R(@"\\srv1\c$", 95), R(@"\\srv1\d$", 50), R(@"\\srv2\c$", 87)
+            R(@"\\srv2\c$", 87), R(@"\\srv1\d$", 50), R(@"\\srv1\c$", 95)
         };
         using var writer = new StringWriter();
         new HtmlRenderer(true, 85, 90, 50).Render(writer, results);
@@ -54,6 +54,18 @@ public sealed class HtmlRendererTests
         using var writer = new StringWriter();
         new HtmlRenderer(true, 85, 90, 5).Render(writer, new[] { R(@"C:\", 50) });
         Assert.Contains($"<td>{System.Net.WebUtility.HtmlEncode(Environment.MachineName)}</td>", writer.ToString());
+    }
+
+    [Fact]
+    public void H15_HostNamesDifferingOnlyInCaseShareOneNodeRow()
+    {
+        var results = new[] { R(@"\\srv1\c$", 95), R(@"\\SRV1\d$", 50) };
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, results);
+        var html = writer.ToString();
+        var nodes = html.Substring(html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal), html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal) - html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal));
+        Assert.Equal(1, nodes.Split("<tr><td>").Length - 1);
+        Assert.Contains("<td class=\"num\">2</td>", nodes);
     }
 
     private static ScanResult R(string target, double percent) => new(target,

@@ -17,7 +17,7 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         output.WriteLine("<h1>dirused report</h1>");
         output.WriteLine($"<p>Generated {E(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture))} on {E(Environment.MachineName)} · warn {warn}% / crit {crit}%</p>");
 
-        var hostVolumes = volumes.GroupBy(Host).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        var hostVolumes = volumes.GroupBy(Host, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
         var hosts = results.Select(Host).Distinct(StringComparer.OrdinalIgnoreCase).Select(host => new
         {
             Host = host,

@@ -76,6 +76,9 @@ public class ArgParserTests
         Assert.Equal("r.html", ArgParser.Parse(new[] { @"C:\", "/html", "/output", "r.html" }).Options!.Output);
         Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output" }).Error);
         Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output", "" }).Error);
+        Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output", "/html" }).Error);
+        Assert.Equal("/output requires a path", ArgParser.Parse(new[] { @"C:\", "/output", "-summary" }).Error);
+        Assert.Equal("//srv/share/r.html", ArgParser.Parse(new[] { @"C:\", "/output", "//srv/share/r.html" }).Options!.Output);
         var json = ArgParser.Parse(new[] { @"C:\", "/json", "/output", "x.json" }).Options!;
         Assert.Equal(OutputFormat.Json, json.Format);
         Assert.False(json.Html);
