@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -134,7 +135,100 @@ public sealed class ScannerTests : IDisposable
         var resDefault = new Scanner().Scan(dir, exact: false);
         Assert.True(resDefault.Complete);
         long defaultTotal = resDefault.Files.Sum(f => f.LogicalBytes);
-        Assert.Equal(2 * 1024 * 1024, defaultTotal);
+        Assert.Equal(1024 * 1024, defaultTotal);
+    }
+
+    [Fact]
+    public void Test_DefaultDedupAndNoPerFileCallsAndExactWithoutOpens()
+    {
+        string tree = PathIn("tree_dedup");
+        string subA = Path.Combine(tree, "subA");
+        string subB = Path.Combine(tree, "subB");
+        Directory.CreateDirectory(subA);
+        Directory.CreateDirectory(subB);
+        string fileA = Path.Combine(subA, "orig.bin");
+        File.WriteAllBytes(fileA, new byte[1024 * 1024]);
+        string fileB = Path.Combine(subB, "link.bin");
+        Assert.True(CreateHardLink(fileB, fileA, IntPtr.Zero));
+
+        var scannerDefault = new Scanner();
+        var resDefault = scannerDefault.Scan(tree, deep: 2, exact: false);
+        Assert.True(resDefault.Complete);
+        long totalLogical = resDefault.Files.Sum(f => f.LogicalBytes);
+        Assert.Equal(1024 * 1024, totalLogical);
+        var fileRows = resDefault.Files.Where(f => f.Path == fileA || f.Path == fileB).ToList();
+        Assert.Equal(2, fileRows.Count);
+        Assert.Single(fileRows, f => f.LogicalBytes > 0);
+        Assert.Single(fileRows, f => f.LogicalBytes == 0);
+
+        Assert.Equal(0, scannerDefault.PerFileCalls);
+
+        var scannerExact = new Scanner();
+        var resExact = scannerExact.Scan(tree, deep: 2, exact: true);
+        Assert.True(resExact.Complete);
+        Assert.Equal(1024 * 1024, resExact.Files.Sum(f => f.LogicalBytes));
+        var exactFileRows = resExact.Files.Where(f => f.Path == fileA || f.Path == fileB).ToList();
+        Assert.Equal(2, exactFileRows.Count);
+        var nonZero = Assert.Single(exactFileRows, f => f.LogicalBytes > 0);
+        Assert.True(nonZero.OnDiskBytes >= 1024 * 1024);
+        Assert.Single(exactFileRows, f => f.LogicalBytes == 0);
+        Assert.Equal(1, scannerExact.PerFileCalls);
+    }
+
+    [Fact]
+    public void Test_LongDirectorySeveralListingBuffers()
+    {
+        string dir = PathIn("long_dir");
+        Directory.CreateDirectory(dir);
+        const int fileCount = 3000;
+        long expectedTotal = 0;
+        for (int i = 0; i < fileCount; i++)
+        {
+            string name = $"file_{i:D6}_{new string('x', 88)}";
+            string filePath = Path.Combine(dir, name);
+            byte[] bytes = new byte[(i % 10) + 1];
+            File.WriteAllBytes(filePath, bytes);
+            expectedTotal += bytes.Length;
+        }
+
+        var scanner = new Scanner();
+        var res = scanner.Scan(dir, deep: 1);
+        Assert.True(res.Complete);
+        Assert.Equal(fileCount, res.Files.Count);
+        Assert.Equal(expectedTotal, res.Files.Sum(f => f.LogicalBytes));
+    }
+
+    [Fact]
+    public void Test_FallbackWhenListingRejected()
+    {
+        string tree = PathIn("fallback_tree");
+        string sub = Path.Combine(tree, "sub");
+        Directory.CreateDirectory(sub);
+        File.WriteAllBytes(Path.Combine(sub, "f.txt"), new byte[512]);
+
+        var scannerFallback = new Scanner(path =>
+        {
+            if (path.EndsWith("sub", StringComparison.OrdinalIgnoreCase))
+                throw new Win32Exception(87);
+            return DirectoryReader.Read(path);
+        });
+
+        var res = scannerFallback.Scan(tree, deep: 2);
+        Assert.True(res.Complete);
+        Assert.Equal(1, scannerFallback.FallbackDirectories);
+        Assert.Contains(res.Files, f => f.Path.EndsWith("f.txt") && f.LogicalBytes == 512);
+
+        var scannerDenied = new Scanner(path =>
+        {
+            if (path.EndsWith("sub", StringComparison.OrdinalIgnoreCase))
+                throw new Win32Exception(5);
+            return DirectoryReader.Read(path);
+        });
+
+        var resDenied = scannerDenied.Scan(tree, deep: 2);
+        Assert.False(resDenied.Complete);
+        Assert.Equal(0, scannerDenied.FallbackDirectories);
+        Assert.Single(resDenied.Errors);
     }
 
     [Fact]

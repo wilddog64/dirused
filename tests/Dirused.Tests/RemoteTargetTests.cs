@@ -123,14 +123,24 @@ public class RemoteTargetTests
             string file = Path.Combine(sub, "one"); File.WriteAllBytes(file, new byte[1024 * 1024]); Assert.True(CreateHardLink(Path.Combine(root, "two"), file, IntPtr.Zero));
             using (var p = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{junction}\" \"{sub}\"") { UseShellExecute = false, CreateNoWindow = true })!) { p.WaitForExit(); Assert.Equal(0, p.ExitCode); }
             string unc = @"\\localhost\" + char.ToLowerInvariant(root[0]) + "$" + root[2..];
-            var local = new Scanner().Scan(root, exact: true); var remote = new Scanner().Scan(unc, exact: true);
-            Assert.True(local.Complete); Assert.True(remote.Complete);
+            var localExact = new Scanner().Scan(root, exact: true); var remoteExact = new Scanner().Scan(unc, exact: true);
+            Assert.True(localExact.Complete); Assert.True(remoteExact.Complete);
             string uncSub = @"\\localhost\" + char.ToLowerInvariant(sub[0]) + "$" + sub[2..];
-            Assert.Equal(1024 * 1024, local.Directories.Single(x => x.Path == sub).LogicalBytes);
-            Assert.Equal(local.Directories.Single(x => x.Path == sub).LogicalBytes, remote.Directories.Single(x => x.Path == uncSub).LogicalBytes);
-            Assert.Equal(local.Directories.Single(x => x.Path == sub).OnDiskBytes, remote.Directories.Single(x => x.Path == uncSub).OnDiskBytes);
-            Assert.Equal(local.Files.Sum(x => x.LogicalBytes), remote.Files.Sum(x => x.LogicalBytes));
-            Assert.Equal(local.Files.Sum(x => x.OnDiskBytes), remote.Files.Sum(x => x.OnDiskBytes));
+            Assert.Equal(1024 * 1024, localExact.Directories.Single(x => x.Path == sub).LogicalBytes);
+            Assert.Equal(localExact.Directories.Single(x => x.Path == sub).LogicalBytes, remoteExact.Directories.Single(x => x.Path == uncSub).LogicalBytes);
+            Assert.Equal(localExact.Directories.Single(x => x.Path == sub).OnDiskBytes, remoteExact.Directories.Single(x => x.Path == uncSub).OnDiskBytes);
+            Assert.Equal(localExact.Files.Sum(x => x.LogicalBytes), remoteExact.Files.Sum(x => x.LogicalBytes));
+            Assert.Equal(localExact.Files.Sum(x => x.OnDiskBytes), remoteExact.Files.Sum(x => x.OnDiskBytes));
+
+            var localDefault = new Scanner().Scan(root, exact: false); var remoteDefault = new Scanner().Scan(unc, exact: false);
+            Assert.True(localDefault.Complete); Assert.True(remoteDefault.Complete);
+            Assert.Equal(1024 * 1024, localDefault.Directories.Single(x => x.Path == sub).LogicalBytes);
+            Assert.Equal(localDefault.Directories.Single(x => x.Path == sub).LogicalBytes, remoteDefault.Directories.Single(x => x.Path == uncSub).LogicalBytes);
+            Assert.Equal(localDefault.Directories.Single(x => x.Path == sub).OnDiskBytes, remoteDefault.Directories.Single(x => x.Path == uncSub).OnDiskBytes);
+            Assert.Equal(localDefault.Files.Sum(x => x.LogicalBytes), remoteDefault.Files.Sum(x => x.LogicalBytes));
+            Assert.Equal(localDefault.Files.Sum(x => x.OnDiskBytes), remoteDefault.Files.Sum(x => x.OnDiskBytes));
+            Assert.Equal(1024 * 1024, localDefault.Files.Sum(x => x.LogicalBytes));
+
             Assert.Equal(RunTotals(root), RunTotals(unc));
         }
         finally { var junction = Path.Combine(root, "junction"); if (Directory.Exists(junction)) Directory.Delete(junction); Directory.Delete(root, true); }

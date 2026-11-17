@@ -56,7 +56,7 @@ C:\dump.bin      512M
 
 - **Top-level by default:** A bare scan lists entries at depth 1 (immediate children of the target). Subtree totals are fully computed.
 - **/deep [n]:** List entries down to `n` directory levels (1–32). Running `/deep` without an argument defaults to 2 levels.
-- **/exact:** By default, scan speeds over the network by reading file length and locally rounding to the volume cluster size without per-file file opens or compression checks. Hard links are counted once per link. With `/exact`, dirused queries on-disk allocation (`GetCompressedFileSize`) and deduplicates hard links.
+- **/exact:** By default, scan speeds over the network by reading file length and locally rounding to the volume cluster size without per-file file opens or compression checks. Both the default scan and `/exact` count a hard-linked file once. With `/exact`, dirused adds true on-disk sizes (`GetCompressedFileSize`).
 - **On disk vs. logical:** "Logical" size is the apparent file length; "on disk" is the space allocated in whole volume clusters (e.g. 4 KB on NTFS, so a 27.2 KB file occupies 28 KB), smaller only for compressed or sparse files. In `/exact` mode, any row whose on-disk size differs from its logical size by more than one cluster appends `(<size> on disk)`.
 
 ### Switches
