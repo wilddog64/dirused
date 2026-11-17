@@ -6,6 +6,8 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 
 ## [Unreleased]
 
+## [v0.0.10] - 2026-11-17
+
 ### Changed
 - The `/html` report colours by `/warn` and `/crit`: a volume at or above `/crit` gets a red bar and a red `CRIT`
   label, one at or above `/warn` a yellow bar and a yellow `WARN` label, and each host's row in the nodes table takes
