@@ -47,8 +47,7 @@ public static class Program
             {
                 renderer.Render(output, results);
                 if (options.Format == OutputFormat.Csv)
-                    foreach (var result in results.Where(r => !r.Complete))
-                        foreach (var item in result.Errors) error.WriteLine(item.Reason);
+                    WriteCsvErrors(error, results);
             }
             return results.Any(r => !r.Complete) ? 3 : 0;
         }
@@ -57,6 +56,12 @@ public static class Program
         {
             Console.CancelKeyPress -= cancelHandler;
         }
+    }
+
+    private static void WriteCsvErrors(TextWriter error, IEnumerable<ScanResult> results)
+    {
+        foreach (var result in results.Where(r => !r.Complete))
+            foreach (var item in result.Errors) error.WriteLine($"{item.Path}: {item.Reason}");
     }
 
     private static ScanResult ProbeSummary(string path)

@@ -96,6 +96,9 @@ Sample `targets.txt`:
     C:\
     \\server\share
 
+When a scan is stopped by a timeout or cancellation, its errors name the folder in progress as `<path>: not finished: scan stopped`.
+If `System Volume Information` at a volume root cannot be read, output labels it `<path>: system only (not counted)`; its usage is included in the volume's used figure.
+
 Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
 
 ## License
