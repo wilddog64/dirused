@@ -1,6 +1,6 @@
 using Dirused.Core;
 namespace Dirused.Common.Renderers;
-public sealed class SummaryRenderer : IRenderer
+public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = false) : IRenderer
 {
     public void Render(TextWriter output, IReadOnlyList<ScanResult> results)
     {
@@ -9,12 +9,19 @@ public sealed class SummaryRenderer : IRenderer
         {
             var v = r.Volume;
             string label = string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive;
-            output.WriteLine($"{label} used {Format.Size(v.UsedBytes)}, free {Format.Size(v.FreeBytes)}, total {Format.Size(v.TotalBytes)}, {v.PercentUsed:F1}% used");
+            var level = Fullness.For(r, warn, crit);
+            Fullness.WriteLine(output, $"{label} used {Format.Size(v.UsedBytes)}, free {Format.Size(v.FreeBytes)}, total {Format.Size(v.TotalBytes)}, {v.PercentUsed:F1}% used{Fullness.Tag(level)}", level, color);
         }
         foreach (var f in failed)
         {
             string reason = f.Errors.FirstOrDefault()?.Reason ?? "Unknown error";
             output.WriteLine($"{f.Target}: {reason}");
+        }
+        if (volumes.Count > 0)
+        {
+            int c = volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Crit);
+            int w = volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Warn);
+            output.WriteLine($"{volumes.Count} volume(s): {c} at or above {crit}%, {w} at or above {warn}%");
         }
     }
 

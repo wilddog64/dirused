@@ -47,7 +47,8 @@ public sealed class SummaryTests : IDisposable
             Assert.DoesNotContain("INCOMPLETE", summary.output);
             // Same volume serial prints once.
             var lines = summary.output.TrimEnd().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
-            Assert.Single(lines);
+            Assert.Equal(2, lines.Length);
+            Assert.StartsWith("1 volume(s): ", lines[1], StringComparison.Ordinal);
 
             // Positive control: without /summary, walking hits the deny-ACL directory and exits 3.
             var walk = Run(root);
@@ -57,7 +58,7 @@ public sealed class SummaryTests : IDisposable
             // /csv header as documented.
             var csv = Run(root, "/summary", "/csv");
             Assert.Equal(0, csv.code);
-            Assert.StartsWith("kind,target,used_bytes,free_bytes,total_bytes,percent_used", csv.output);
+            Assert.StartsWith("kind,target,used_bytes,free_bytes,total_bytes,percent_used,level", csv.output);
 
             // /json has summary: true and empty directories/files.
             var json = Run(root, "/summary", "/json");

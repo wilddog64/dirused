@@ -239,10 +239,11 @@ public sealed class FleetRunnerTests : IDisposable
         using var textOut = new StringWriter();
         new SummaryRenderer().Render(textOut, all);
         var lines = textOut.ToString().TrimEnd().Split(Environment.NewLine);
-        Assert.Equal(3, lines.Length);
+        Assert.Equal(4, lines.Length);
         Assert.StartsWith("D:\\", lines[0]);
         Assert.StartsWith("C:\\", lines[1]);
         Assert.Equal("Z:\\: Access denied", lines[2]);
+        Assert.Equal("2 volume(s): 0 at or above 90%, 0 at or above 85%", lines[^1]);
 
         using var csvOut = new StringWriter();
         new CsvRenderer(summary: true).Render(csvOut, all);
@@ -295,6 +296,7 @@ public sealed class FleetRunnerTests : IDisposable
 
         // Positive control: the complete target on the same volume still prints its volume line.
         Assert.Contains(lines, l => l.StartsWith("E:\\ used", StringComparison.Ordinal));
-        Assert.Equal(2, lines.Length);
+        Assert.Equal(3, lines.Length);
+        Assert.Equal("1 volume(s): 0 at or above 90%, 0 at or above 85%", lines[^1]);
     }
 }

@@ -36,7 +36,7 @@ public class OutputCompatTests
             string file = Path.Combine(sub, "file"); File.WriteAllBytes(file, new byte[4096]);
             Assert.True(CreateHardLink(Path.Combine(sub, "link"), file, IntPtr.Zero));
             using (var p = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{Path.Combine(root, "junction")}\" \"{sub}\"") { UseShellExecute = false, CreateNoWindow = true })!) { p.WaitForExit(); Assert.Equal(0, p.ExitCode); }
-            var scan = new Scanner().Scan(root); Assert.True(scan.Complete);
+            var scan = new Scanner().Scan(root); Assert.True(scan.Complete); scan = scan with { Level = Fullness.For(scan, 85, 90) };
             foreach (string flag in new[] { "", "/json", "/csv" })
             {
                 using var output = new StringWriter(); using var error = new StringWriter();

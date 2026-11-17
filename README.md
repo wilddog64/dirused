@@ -78,6 +78,8 @@ Switches (use /, - or -- in any case):
   /all                All local drives, or every drive on each target host
   /file <path>        Read targets from file, one per line (default: none)
   /summary            Volume usage only, no directory walk (default: off)
+  /warn <n>           Warning fullness threshold (default: 85)
+  /crit <n>           Critical fullness threshold (default: 90)
   /deep [n]           List n directory levels, 1-32 (/deep alone: 2)
   /exact              On-disk sizes and hard-link dedup (slower)
   /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)
@@ -88,6 +90,7 @@ Exit codes:
   0  All targets completed
   1  Usage error or unreadable target file
   3  Any target incomplete, failed, or timed out
+  4  Any volume at or above /crit (takes precedence over 3)
 ```
 
 Sample `targets.txt`:
@@ -99,7 +102,7 @@ Sample `targets.txt`:
 When a scan is stopped by a timeout or cancellation, its errors name the folder in progress as `<path>: not finished: scan stopped`.
 If `System Volume Information` at a volume root cannot be read, output labels it `<path>: system only (not counted)`; its usage is included in the volume's used figure.
 
-Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Exit codes are 0 for success, 1 for an error, and 3 for an incomplete scan.
+Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets.
 
 ## License
 

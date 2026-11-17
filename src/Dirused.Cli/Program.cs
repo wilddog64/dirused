@@ -30,12 +30,13 @@ public static class Program
                 .Select(x => options.Format == OutputFormat.Text
                     ? x.Result
                     : x.Result with { Directories = x.Result.Directories.Take(options.Top).ToList(), Files = x.Result.Files.Take(options.Top).ToList() })
+                .Select(x => x with { Level = Fullness.For(x, options.Warn, options.Crit) })
                 .ToList();
             IRenderer renderer = options.Format switch
             {
                 OutputFormat.Json => new JsonRenderer(options.Summary),
-                OutputFormat.Csv => new CsvRenderer(options.Summary),
-                _ => options.Summary ? new SummaryRenderer() : new TextRenderer(options.Top, options.Exact)
+                OutputFormat.Csv => new CsvRenderer(options.Summary, options.Warn, options.Crit),
+                _ => options.Summary ? new SummaryRenderer(options.Warn, options.Crit, options.Format == OutputFormat.Text && ReferenceEquals(output, Console.Out)) : new TextRenderer(options.Top, options.Exact, warn: options.Warn, crit: options.Crit, color: options.Format == OutputFormat.Text && ReferenceEquals(output, Console.Out))
             };
             if (options.Format == OutputFormat.Text && !options.Summary)
             {
@@ -49,6 +50,7 @@ public static class Program
                 if (options.Format == OutputFormat.Csv)
                     WriteCsvErrors(error, results);
             }
+            if (results.Any(r => r.Level == FullnessLevel.Crit)) return 4;
             return results.Any(r => !r.Complete) ? 3 : 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception or System.Security.SecurityException) { error.WriteLine(ex.Message); return 1; }

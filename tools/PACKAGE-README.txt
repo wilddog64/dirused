@@ -2,7 +2,7 @@ dirused - Windows disk usage for local drives, UNC paths and \\node admin shares
 
 Contents
   dirused.exe      self-contained single file; no .NET install needed
-  live-check.ps1   live checks (L1-L10) plus optional fleet checks (F1-F2)
+  live-check.ps1   live checks (L1-L12) plus optional fleet checks (F1-F2)
   README.txt       this file
 
 dirused uses your current Windows login only. It never asks for or stores
@@ -31,12 +31,13 @@ Exit codes
   1  usage error or unreadable target file
   3  at least one target incomplete, failed or timed out
      (the others still report)
+  4  at least one volume at or above /crit; takes precedence over 3
 
 Live checks
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1 -Targets fleet.txt
 
-  L1-L10 run against this machine (\\localhost and C:\). -Targets adds F1
+  L1-L12 run against this machine (\\localhost and C:\). -Targets adds F1
   (fleet /summary: every failure must be labelled UNREACHABLE, ACCESS DENIED,
   TIMED OUT or CANCELLED)
   and F2 (a full fleet scan with /parallel 8 finishes). Save the output and

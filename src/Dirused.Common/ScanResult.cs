@@ -14,4 +14,6 @@ public record Volume(string Drive, long UsedBytes, long FreeBytes, long TotalByt
 public record ScanResult(string Target, Volume Volume, List<Entry> Directories, List<Entry> Files, List<ScanError> Errors, bool Complete, bool Exact = false)
 {
     public List<string> SystemOnly { get; init; } = new();
+    [System.Text.Json.Serialization.JsonConverter(typeof(Dirused.Common.Renderers.FullnessLevelJsonConverter))]
+    public Dirused.Common.Renderers.FullnessLevel? Level { get; init; }
 }

@@ -48,7 +48,7 @@ $r = Invoke-Dirused @('\\nosuchhost-xyz')
 Test-Check 'L2' 'unreachable bare node prints UNREACHABLE with a known code and exits 3' (($r.rc -eq 3) -and ($r.out -match "UNREACHABLE: \\\\nosuchhost-xyz.* \($codes\)")) $r
 
 $letters = @(Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' } | ForEach-Object { "$($_.DriveLetter)" } | Sort-Object)
-$r = Invoke-Dirused @('\\localhost', '/summary', '/json')
+$r = Invoke-Dirused @('\\localhost', '/summary', '/json', '/warn', '99', '/crit', '100')
 $j = ConvertFrom-DirusedJson $r
 $got = @()
 if ($j) { $got = @($j.targets | Where-Object { $_.complete } | ForEach-Object { $_.target }) }
@@ -94,7 +94,7 @@ $j = ConvertFrom-DirusedJson $r
 $timedOut = $j -and (@($j.targets[0].errors | Where-Object { $_.reason -eq 'TIMED OUT after 2s' }).Count -eq 1) -and (-not $j.targets[0].complete)
 Test-Check 'L7' 'full scan of C:\ with /timeout 2s reports TIMED OUT after 2s within 30s, exit 3' (($r.rc -eq 3) -and $timedOut -and ($r.seconds -lt 30)) $r
 
-$r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/timeout', '30s')
+$r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/timeout', '30s', '/warn', '99', '/crit', '100')
 Test-Check 'L8' 'positive control: /summary of a local folder with a generous /timeout completes, exit 0' (($r.rc -eq 0) -and ($r.out -notmatch 'TIMED OUT|CANCELLED')) $r
 
 $r = Invoke-Dirused @('C:\Windows\Web', '/parallel', '65')
@@ -102,6 +102,12 @@ Test-Check 'L9' '/parallel 65 is rejected as a usage error, exit 1' (($r.rc -eq 
 
 $r = Invoke-Dirused @('/help')
 Test-Check 'L10' '/help prints switches and exit codes, exit 0' (($r.rc -eq 0) -and ($r.out -match 'Exit codes') -and ($r.out -match '/parallel')) $r
+
+$r = Invoke-Dirused @('C:\Windows\Web', '/summary', '/warn', '1', '/crit', '2')
+Test-Check 'L11' '/summary with /warn 1 /crit 2 tags the volume [CRIT], prints the footer, exit 4' (($r.rc -eq 4) -and ($r.out -match '\[CRIT\]') -and ($r.out -match '1 volume\(s\): 1 at or above 2%, 0 at or above 1%')) $r
+
+$r = Invoke-Dirused @('C:\Windows\Web', '/warn', '95')
+Test-Check 'L12' '/warn at or above /crit is rejected as a usage error, exit 1' (($r.rc -eq 1) -and ($r.out -match '/warn must be below /crit')) $r
 
 Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -126,11 +132,11 @@ if ($Targets) {
             }
         }
     }
-    Test-Check 'F1' "fleet /summary: $complete complete, $labelled labelled failures, no unlabelled error codes" (($r.rc -eq 0 -or $r.rc -eq 3) -and $j -and $raw.Count -eq 0) $r
+    Test-Check 'F1' "fleet /summary: $complete complete, $labelled labelled failures, no unlabelled error codes" (($r.rc -eq 0 -or $r.rc -eq 3 -or $r.rc -eq 4) -and $j -and $raw.Count -eq 0) $r
     $r = Invoke-Dirused @('/file', $Targets, '/timeout', '120s', '/parallel', '8', '/top', '3')
     "    full scan of the fleet: rc=$($r.rc) in $($r.seconds)s"
     $r.out -split "`n" | Select-Object -First 60 | ForEach-Object { "    $_" }
-    Test-Check 'F2' 'fleet full scan with /parallel 8 and /timeout 120s finishes, exit 0 or 3' (($r.rc -eq 0) -or ($r.rc -eq 3)) $r
+    Test-Check 'F2' 'fleet full scan with /parallel 8 and /timeout 120s finishes, exit 0, 3 or 4' (($r.rc -eq 0) -or ($r.rc -eq 3) -or ($r.rc -eq 4)) $r
 }
 ""
 "RESULT: $script:passed passed, $script:failed failed"
