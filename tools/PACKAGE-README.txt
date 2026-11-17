@@ -14,7 +14,8 @@ Quick start (PowerShell, from the unzipped folder)
   .\dirused.exe C:\                      local drive, top 50 folders and files
   .\dirused.exe \\server\c$\apps         one folder on another machine
   .\dirused.exe \\server                 every <letter>$ admin share on server
-  .\dirused.exe \\server /summary        volume used/free only, no folder walk
+  .\dirused.exe \\server /summary        volume usage; a warn/crit volume also lists
+                                         its top 3 folders
 
 Fleet run
   Put one target per line in a text file. Lines starting with # and blank

@@ -20,10 +20,19 @@ public sealed class TopFoldersTests
         var targets = new[] { Target("ok"), Target("warn"), Target("crit"), Target("null") };
         var results = new[] { Result("ok") with { Level = FullnessLevel.Ok }, Result("warn") with { Level = FullnessLevel.Warn }, Result("crit") with { Level = FullnessLevel.Crit }, Result("null") };
         var walked = new List<string>();
-        var attached = TopFolders.Attach(targets, results, (t, _) => { walked.Add(t.Display); return FolderScan(t.Display); }, new(), CancellationToken.None);
-        Assert.Equal(new[] { "warn", "crit" }, walked);
+        var walkedLock = new object();
+        var attached = TopFolders.Attach(targets, results, (t, _) =>
+        {
+            if (t.Display == "warn") Thread.Sleep(100);
+            lock (walkedLock) walked.Add(t.Display);
+            return FolderScan(t.Display, new Entry(t.Display, 1, 0));
+        }, new(), CancellationToken.None);
+        Assert.Equal(2, walked.Count);
+        Assert.Equal(new[] { "crit", "warn" }, walked.OrderBy(name => name));
         Assert.Empty(attached[0].Directories);
         Assert.Null(attached[0].TopFoldersNote);
+        Assert.Equal("warn", attached[1].Directories[0].Path);
+        Assert.Equal("crit", attached[2].Directories[0].Path);
         Assert.Empty(attached[3].Directories);
         Assert.Null(attached[3].TopFoldersNote);
     }
