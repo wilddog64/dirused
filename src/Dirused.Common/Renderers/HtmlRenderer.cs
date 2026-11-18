@@ -76,11 +76,12 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         var largestGroups = (summary ? volumes : results).Where(r => r.Largest != null).ToList();
         if (largestGroups.Count > 0)
         {
-            output.WriteLine("<h2>Largest candidate files</h2><div class=\"scroll\"><table class=\"largest\"><thead><tr><th>Host</th><th>Size</th><th>Modified</th><th>Path</th></tr></thead><tbody>");
+            bool purge = largestGroups.Any(r => r.Largest!.Files.Any(f => f.PurgeStatus != null));
+            output.WriteLine("<h2>Largest candidate files</h2><div class=\"scroll\"><table class=\"largest\"><thead><tr><th>Host</th><th>Size</th><th>Modified</th><th>Path</th>" + (purge ? "<th>Purge</th>" : "") + "</tr></thead><tbody>");
             foreach (var r in largestGroups)
             {
                 var l = r.Largest!;
-                output.WriteLine($"<tr class=\"group\"><th colspan=\"4\">{E(Host(r))} {E(r.Target)}: {l.Files.Count} of {l.Matches.ToString("N0", CultureInfo.InvariantCulture)} matches, {E(Format.Size(l.MatchedBytes))}{(l.Complete ? "" : " (scan incomplete)")}</th></tr>");
+                output.WriteLine($"<tr class=\"group\"><th colspan=\"{(purge ? 5 : 4)}\">{E(Host(r))} {E(r.Target)}: {l.Files.Count} of {l.Matches.ToString("N0", CultureInfo.InvariantCulture)} matches, {E(Format.Size(l.MatchedBytes))}{(l.PurgeBytes is long b ? (l.PurgeDryRun == true ? ", would free " : ", freed ") + E(Format.Size(b)) : "")}{(l.Complete ? "" : " (scan incomplete)")}</th></tr>");
                 var maxBytes = l.Files.Count == 0 ? 0 : l.Files.Max(f => f.LogicalBytes);
                 foreach (var f in l.Files)
                 {
@@ -89,7 +90,7 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
                     double pct = maxBytes <= 0 || f.LogicalBytes <= 0 ? 0 : f.LogicalBytes * 100.0 / maxBytes;
                     string bar = pct.ToString("0.##", CultureInfo.InvariantCulture);
                     string barFill = pct == 0 ? "" : $"<span style=\"width:{bar}%\"></span>";
-                    output.WriteLine($"<tr{rowClass}><td>{E(Host(r))}</td><td class=\"num\">{E(Format.Size(f.LogicalBytes))}<span class=\"bar\">{barFill}</span></td><td class=\"date\">{E(f.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-")}</td><td>{E(f.Path)}</td></tr>");
+                    output.WriteLine($"<tr{rowClass}><td>{E(Host(r))}</td><td class=\"num\">{E(Format.Size(f.LogicalBytes))}<span class=\"bar\">{barFill}</span></td><td class=\"date\">{E(f.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-")}</td><td>{E(f.Path)}</td>" + (purge ? $"<td class=\"purge\">{E(f.PurgeStatus)}</td>" : "") + "</tr>");
                 }
             }
             output.WriteLine("</tbody></table></div>");

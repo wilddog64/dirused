@@ -16,6 +16,7 @@ public static class ArgParser
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
         "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +
         "               [/warn [1-100]] [/crit [1-100]]\n" +
+        "              [/largest <patterns> [/purge [days] [/minsize <size>] [/confirm]]]\n" +
         "Run dirused /help for more.";
 
     public const string DefaultHtmlPath = @"C:\temp\output.html";
@@ -49,6 +50,17 @@ public static class ArgParser
         "  /largest [patterns] Largest matching files under each target\n" +
         "                      (README defaults; + adds; plain list replaces; * all)\n" +
         "  /largestcount <n>   How many /largest files per target, 1-1000 (default: 20)\n" +
+        "  /purge [days]       Delete the files /largest lists that were last\n" +
+        "                      modified more than [days] days ago (default: 1)\n" +
+        "                      and are at least /minsize big (default: 1GB).\n" +
+        "                      Needs /largest with file patterns. Without /confirm\n" +
+        "                      this is a dry run: nothing is deleted, the report\n" +
+        "                      shows what would be.\n" +
+        "  /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,\n" +
+        "                      999MB, 2GB (default: 1GB)\n" +
+        "  /confirm            With /purge: really delete. Deletes are permanent\n" +
+        "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
+        "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
         "  /parallel <n>       Max concurrent scans, 1-64 (default: 4)\n" +
         "  /help               Show this help\n" +
@@ -56,10 +68,24 @@ public static class ArgParser
         "  /update             Download and install the latest release\n" +
         "  /noupdatecheck      Do not check for updates during this run\n" +
         "\n" +
+        "Purge examples:\n" +
+        "  dirused D:\\ /largest *.log /purge\n" +
+        "      Dry run: list what would be deleted, delete nothing\n" +
+        "  dirused D:\\ /largest *.log /purge /confirm\n" +
+        "      Delete the listed .log files of 1GB or more not modified in the last day\n" +
+        "  dirused D:\\ /largest *.log /purge /minsize 100MB\n" +
+        "      Dry run: also include listed .log files from 100MB\n" +
+        "  dirused /file servers.txt /largest *.log;*.hprof /purge 7 /confirm\n" +
+        "      On every server, delete listed .log and .hprof files older than 7 days\n" +
+        "Purge only deletes files in the /largest list. It skips files\n" +
+        "smaller than /minsize, files modified within [days], files changed since\n" +
+        "the scan, links, hard-linked files and anything outside the target.\n" +
+        "A file in use is reported as failed.\n" +
+        "\n" +
         "Exit codes:\n" +
         "  0  All targets completed\n" +
         "  1  Usage error or unreadable target file\n" +
-        "  3  Any target incomplete, failed, or timed out\n" +
+        "  3  Any target incomplete, failed, timed out, or a /purge did not finish\n" +
         "  4  Any volume at or above /crit (takes precedence over 3)";
 
     public const string MultiTargetWarning =
@@ -81,7 +107,8 @@ public static class ArgParser
         string? output = null;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
         int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
-        IReadOnlyList<string>? largest = null; bool largestGiven = false; int largestCount = 20;
+        IReadOnlyList<string>? largest = null; bool largestGiven = false, largestExplicit = false; int largestCount = 20;
+        bool purge = false, confirm = false, minSizeGiven = false, largestHasAdd = false; int purgeDays = 1; long purgeMinBytes = 1L << 30;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -99,7 +126,19 @@ public static class ArgParser
                     case "output":
                         if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/output requires a path");
                         output = args[i]; break;
-                    case "purge": case "plan": return new(Error: "not available yet (M2)");
+                    case "purge":
+                        purge = true;
+                        if (i + 1 < args.Length && args[i + 1].Length > 0 && args[i + 1].All(char.IsAsciiDigit))
+                        {
+                            if (!int.TryParse(args[++i], out purgeDays) || purgeDays < 1 || purgeDays > 3650) return new(Error: "/purge requires a number of days from 1 to 3650");
+                        }
+                        break;
+                    case "confirm": confirm = true; break;
+                    case "minsize":
+                        minSizeGiven = true;
+                        if (i + 1 >= args.Length || !TryParseMinSize(args[++i], out purgeMinBytes)) return new(Error: "/minsize needs a size like 100MB or 2GB");
+                        break;
+                    case "plan": return new(Error: "not available yet (M2)");
                     case "monitor": case "threshold": return new(Error: "not available yet (M3)");
                     case "gui": return new(Error: "not available yet (GUI)");
                     case "node": return new(Error: "not available yet (M1b)");
@@ -152,8 +191,9 @@ public static class ArgParser
                         {
                             string next = args[i + 1];
                             bool isSwitch = (next.StartsWith('/') && !next.StartsWith("//", StringComparison.Ordinal)) || next.StartsWith('-');
-                            if (!isSwitch && (next.IndexOfAny(new[] { '*', '?', ';', ',' }) >= 0 || next.StartsWith('+'))) { patternArg = next; i++; }
+                            if (!isSwitch && (next.IndexOfAny(new[] { '*', '?', ';', ',' }) >= 0 || next.StartsWith('+'))) { patternArg = next; largestExplicit = true; i++; }
                         }
+                        largestHasAdd = patternArg?.Split(new[] { ';', ',' }, StringSplitOptions.None).Any(p => p.TrimStart().StartsWith('+')) == true;
                         if (!Largest.ParsePatterns(patternArg, out largest, out var patternError)) return new(Error: patternError);
                         break;
                     case "largestcount":
@@ -176,6 +216,16 @@ public static class ArgParser
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
             else return new(Error: $"Invalid target: {arg}");
         }
+        if (minSizeGiven && !purge) return new(Error: "/minsize requires /purge");
+        if (purge && !largestGiven) return new(Error: "/purge requires /largest");
+        if (confirm && !purge) return new(Error: "/confirm requires /purge");
+        if (purge && (!largestGiven || !largestExplicit)) return new(Error: "/purge requires /largest with file patterns, e.g. /largest *.log");
+        if (purge && largest!.Any(p => !p.Any(c => c is not ('*' or '?' or '.')))) return new(Error: "/purge cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log");
+        if (purge && largestHasAdd) return new(Error: "/purge needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip");
+        if (purge && targets.Any(t => t.Length > 0 && t.All(char.IsAsciiDigit))) return new(Error: "put the number of days right after /purge (e.g. /purge 7)");
+        bool effectiveSummary = summary && !deepGiven && !exact;
+        if (purge && effectiveSummary && csv && !html) return new(Error: "/purge with /summary /csv needs /html, which lists the files");
+        if (purge && confirm && output != null && Path.GetFullPath(output).Equals(Path.GetFullPath(PurgeLog.DefaultPath), StringComparison.OrdinalIgnoreCase)) return new(Error: "/output cannot be the purge log");
         if (file != null)
         {
             if (!TryReadTargetFile(file, out var fileTargets, out var fileError)) return new(Error: fileError);
@@ -188,11 +238,20 @@ public static class ArgParser
         if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (!largestGiven && args.Any(a => IsFlag(a, "largestcount"))) return new(Error: "/largestcount requires /largest");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
-        bool effectiveSummary = summary && !deepGiven && !exact;
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes));
     }
 
     public static string? RejectUnavailable(Options options) => null;
+
+    private static bool TryParseMinSize(string value, out long bytes)
+    {
+        bytes = 0;
+        var match = System.Text.RegularExpressions.Regex.Match(value, @"^([0-9]+)(KB|MB|GB|TB)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!match.Success || !long.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out long number) || number == 0) return false;
+        long multiplier = match.Groups[2].Value.ToUpperInvariant() switch { "KB" => 1L << 10, "MB" => 1L << 20, "GB" => 1L << 30, "TB" => 1L << 40, _ => 0 };
+        try { bytes = checked(number * multiplier); return true; }
+        catch (OverflowException) { return false; }
+    }
 
     private static bool TryParseTimeout(string s, out TimeSpan timeout)
     {

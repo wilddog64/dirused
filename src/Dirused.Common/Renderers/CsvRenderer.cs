@@ -1,14 +1,14 @@
 using System.Globalization;
 using Dirused.Core;
 namespace Dirused.Common.Renderers;
-public sealed class CsvRenderer(bool summary = false, int warn = 85, int crit = 90) : IRenderer
+public sealed class CsvRenderer(bool summary = false, int warn = 85, int crit = 90, bool purge = false) : IRenderer
 {
     public void Render(TextWriter output, IReadOnlyList<ScanResult> results)
     {
         if (!summary)
         {
-            output.WriteLine("kind,target,path,logical_bytes,on_disk_bytes");
-            foreach (var r in results) { foreach (var e in r.Directories) Format.Row(output, "directory", r.Target, e); foreach (var e in r.Files) Format.Row(output, "file", r.Target, e); if (r.Largest != null) foreach (var f in r.Largest.Files) output.WriteLine($"largest,{Format.Quote(r.Target)},{Format.Quote(f.Path)},{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)},{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)}"); }
+            output.WriteLine("kind,target,path,logical_bytes,on_disk_bytes" + (purge ? ",purge_status" : ""));
+            foreach (var r in results) { foreach (var e in r.Directories) Format.Row(output, "directory", r.Target, e, purge); foreach (var e in r.Files) Format.Row(output, "file", r.Target, e, purge); if (r.Largest != null) foreach (var f in r.Largest.Files) output.WriteLine($"largest,{Format.Quote(r.Target)},{Format.Quote(f.Path)},{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)},{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)}" + (purge ? "," + Format.Quote(f.PurgeStatus ?? "") : "")); }
             return;
         }
         output.WriteLine("kind,target,used_bytes,free_bytes,total_bytes,percent_used,level");

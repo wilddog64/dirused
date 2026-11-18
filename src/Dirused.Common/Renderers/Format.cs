@@ -25,5 +25,5 @@ public static class Format
         return $"{intVal}{units[i]}";
     }
     public static string Quote(string s) => "\"" + s.Replace("\"", "\"\"") + "\"";
-    public static void Row(TextWriter w, string kind, string target, Entry e) => w.WriteLine($"{kind},{Quote(target)},{Quote(e.Path)},{e.LogicalBytes.ToString(CultureInfo.InvariantCulture)},{e.OnDiskBytes.ToString(CultureInfo.InvariantCulture)}");
+    public static void Row(TextWriter w, string kind, string target, Entry e, bool purge = false) => w.WriteLine($"{kind},{Quote(target)},{Quote(e.Path)},{e.LogicalBytes.ToString(CultureInfo.InvariantCulture)},{e.OnDiskBytes.ToString(CultureInfo.InvariantCulture)}" + (purge ? "," : ""));
 }

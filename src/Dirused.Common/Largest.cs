@@ -23,8 +23,15 @@ public static class Largest
     public static bool Matches(string fileName, IReadOnlyList<string> patterns) => patterns.Any(p => FileSystemName.MatchesSimpleExpression(p, fileName, ignoreCase: true));
 }
 
-public sealed record LargestFile(string Path, long LogicalBytes, DateTime? LastWriteUtc);
-public sealed record LargestFiles(IReadOnlyList<string> Patterns, long Matches, long MatchedBytes, List<LargestFile> Files, bool Complete);
+public sealed record LargestFile(string Path, long LogicalBytes, DateTime? LastWriteUtc)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public string? PurgeStatus { get; init; }
+}
+public sealed record LargestFiles(IReadOnlyList<string> Patterns, long Matches, long MatchedBytes, List<LargestFile> Files, bool Complete)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public long? PurgeBytes { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public bool? PurgeDryRun { get; init; }
+}
 
 public sealed class LargestCollector
 {
