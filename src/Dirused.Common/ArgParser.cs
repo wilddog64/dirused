@@ -105,6 +105,8 @@ public static class ArgParser
                     case "node": return new(Error: "not available yet (M1b)");
                     case "file":
                         if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i])) return new(Error: "/file requires a path");
+                        if (args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal)))
+                            return new(Error: $"/file requires a file name before the next switch (got '{args[i]}')");
                         file = args[i]; break;
                     case "summary": summary = true; break;
                     case "warn":

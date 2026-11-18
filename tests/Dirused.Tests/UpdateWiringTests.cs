@@ -64,7 +64,7 @@ public sealed class UpdateWiringTests
             Assert.True(usageIndex >= 0 && noticeIndex > usageIndex); Assert.Equal(1, source.FindCalls); Assert.Equal(0, source.DownloadCalls); Assert.StartsWith(scratch, Path.GetDirectoryName(state));
             output.GetStringBuilder().Clear(); error.GetStringBuilder().Clear();
             Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), output, error, source, "0.0.10", state));
-            Assert.Contains("Run dirused /help for more.", error.ToString()); Assert.DoesNotContain("is available", error.ToString()); Assert.Equal(1, source.FindCalls);
+            Assert.Contains("Run dirused /help for more.", error.ToString()); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Equal(1, source.FindCalls);
         }
         finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
     }

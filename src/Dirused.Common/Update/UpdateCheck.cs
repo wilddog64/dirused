@@ -40,16 +40,16 @@ public sealed class UpdateCheck
         if (inFlightCheck != null && !inFlightCheck.IsCompleted) return;
         var state = _pendingNoticeState;
         _pendingNoticeState = null;
-        if (state != null) PrintNotice(state, _clock());
+        if (state != null) PrintNotice(state);
     }
 
-    private void PrintNotice(UpdateState state, DateTimeOffset now)
+    private void PrintNotice(UpdateState state)
     {
         if (GitHubReleaseSource.Parse(state.Latest ?? "") is not { } latest || GitHubReleaseSource.Compare(latest, GitHubReleaseSource.Parse(_version)) <= 0) return;
         var latestVersion = string.Join('.', latest);
-        if (state.NoticedVersion == latestVersion) return;
         _error.WriteLine($"dirused {latestVersion} is available (you have {_version}). Run: dirused /update");
-        TryWrite(state with { NoticedUtc = now, NoticedVersion = latestVersion });
+        _error.WriteLine("  To stop checking, add /noupdatecheck or set DIRUSED_NO_UPDATE_CHECK=1.");
+        _error.WriteLine($"  Release notes: https://github.com/wilddog64/dirused/releases/tag/v{latestVersion}");
     }
 
     private void TryWrite(UpdateState state) { try { state.Write(_statePath); } catch { } }
