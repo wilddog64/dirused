@@ -79,8 +79,8 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
     {
         if (largest == null) return;
         if (largest.Matches == 0) { output.WriteLine("Largest candidate files: none matched" + (largest.Complete ? "" : " (scan incomplete)")); return; }
-        output.WriteLine($"Largest candidate files ({largest.Files.Count} of {largest.Matches.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} matches, {size(largest.MatchedBytes)}):" + (largest.Complete ? "" : " (scan incomplete)"));
+        output.WriteLine($"Largest candidate files ({largest.Files.Count} of {largest.Matches.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} matches, {size(largest.MatchedBytes)}{(largest.PurgeBytes is long b ? (largest.PurgeDryRun == true ? ", would free " : ", freed ") + size(b) : "") }):" + (largest.Complete ? "" : " (scan incomplete)"));
         foreach (var file in largest.Files)
-            output.WriteLine($"  {size(file.LogicalBytes)}  {(file.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-")}  {file.Path}");
+            output.WriteLine($"  {size(file.LogicalBytes)}  {(file.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-")}  {file.Path}{(file.PurgeStatus == null ? "" : $"  [{file.PurgeStatus}]")}");
     }
 }

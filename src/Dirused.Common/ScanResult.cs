@@ -22,4 +22,6 @@ public record ScanResult(string Target, Volume Volume, List<Entry> Directories, 
     public string? TopFoldersNote { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public LargestFiles? Largest { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ScanRoot { get; init; }
 }

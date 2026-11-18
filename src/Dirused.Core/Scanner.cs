@@ -50,7 +50,7 @@ public sealed class Scanner
             files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(),
             errors,
             errors.Count == 0 && !ct.IsCancellationRequested,
-            exact) { SystemOnly = systemOnly.ToList(), Largest = largest?.Snapshot(errors.Count == 0 && !ct.IsCancellationRequested) };
+            exact) { SystemOnly = systemOnly.ToList(), Largest = largest?.Snapshot(errors.Count == 0 && !ct.IsCancellationRequested), ScanRoot = full };
     }
 
     private (long logical, long disk) Walk(string path, int depth, int maxDepth, bool exact, CancellationToken ct, LargestCollector? largest)

@@ -214,7 +214,10 @@ public sealed class FleetRunnerTests : IDisposable
             Assert.Contains(required, text);
         Assert.Contains("exit", text, StringComparison.OrdinalIgnoreCase);
 
-        foreach (string refused in new[] { "/purge", "/monitor", "/gui" })
+        Assert.Contains("/purge [days]", text);
+        Assert.Contains("/confirm", text);
+        Assert.Contains("/minsize <size>", text);
+        foreach (string refused in new[] { "/monitor", "/gui" })
             Assert.DoesNotContain(refused, text);
 
         foreach (string line in text.Replace("\r\n", "\n").Split('\n'))

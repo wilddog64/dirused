@@ -45,8 +45,54 @@ public class ArgParserTests
         Assert.Equal("/warn must be below /crit", ArgParser.Parse(new[] { "/crit", "/warn", "95", @"C:\" }).Error);
     }
 
+    [Fact]
+    public void PurgeSwitches()
+    {
+        var basic = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge" });
+        Assert.Null(basic.Error); Assert.Equal(1L << 30, Property<long>(basic.Options!, "PurgeMinBytes"));
+        Assert.True(Property<bool>(basic.Options!, "Purge"));
+        Assert.Equal(1, Property<int>(basic.Options!, "PurgeDays")); Assert.False(Property<bool>(basic.Options!, "Confirm"));
+        var seven = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "7", "/confirm" });
+        Assert.Null(seven.Error); Assert.Equal(7, Property<int>(seven.Options!, "PurgeDays")); Assert.True(Property<bool>(seven.Options!, "Confirm"));
+        Assert.Equal("/purge requires /largest", ArgParser.Parse(new[] { @"C:\", "/purge" }).Error);
+        Assert.Equal("/confirm requires /purge", ArgParser.Parse(new[] { @"C:\", "/confirm" }).Error);
+        Assert.Equal("/purge requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "/purge" }).Error);
+        Assert.Equal("/purge requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge" }).Error);
+        foreach (var p in new[] { "*", "*.*", "**", "*?", "+*", "+*.*", "*.log;*" })
+            Assert.Equal("/purge cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", p, "/purge" }).Error);
+        Assert.Equal("/purge needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip", ArgParser.Parse(new[] { @"C:\", "/largest", "+*.zip", "/purge" }).Error);
+        Assert.Null(ArgParser.Parse(new[] { @"C:\", "/largest", "*.log;*.zip", "/purge" }).Error);
+        Assert.Equal("/purge requires a number of days from 1 to 3650", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "0" }).Error);
+        Assert.Equal("/purge requires a number of days from 1 to 3650", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "3651" }).Error);
+        Assert.Equal("put the number of days right after /purge (e.g. /purge 7)", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/confirm", "7" }).Error);
+        Assert.Equal("/purge with /summary /csv needs /html, which lists the files", ArgParser.Parse(new[] { @"C:\", "/summary", "/csv", "/largest", "*.log", "/purge" }).Error);
+        Assert.Equal("/output cannot be the purge log", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/confirm", "/output", PurgeLog.DefaultPath }).Error);
+        Assert.Null(ArgParser.Parse(new[] { @"C:\", "/largest", "*.log;*.hprof", "/purge" }).Error);
+        var sizes = new[] { ("100MB", 100L << 20), ("999mb", 999L << 20), ("2GB", 2L << 30), ("1KB", 1L << 10) };
+        foreach (var (size, bytes) in sizes)
+        {
+            var parsed = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/minsize", size });
+            Assert.Null(parsed.Error); Assert.Equal(bytes, Property<long>(parsed.Options!, "PurgeMinBytes"));
+        }
+        foreach (var size in new[] { "100", "1.5GB", "0MB", "-1GB", "9999999999TB" })
+            Assert.Equal("/minsize needs a size like 100MB or 2GB", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/minsize", size }).Error);
+        Assert.Equal("/minsize needs a size like 100MB or 2GB", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/minsize" }).Error);
+        Assert.Equal("/minsize needs a size like 100MB or 2GB", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/minsize", "/confirm" }).Error);
+        Assert.Equal("/minsize requires /purge", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/minsize", "1GB" }).Error);
+        Assert.Equal("/minsize requires /purge", ArgParser.Parse(new[] { @"C:\", "/minsize", "1GB" }).Error);
+        Assert.Contains("  /purge [days]       Delete the files /largest lists that were last\n", ArgParser.UsageText);
+        Assert.Contains("                      and are at least /minsize big (default: 1GB).\n", ArgParser.UsageText);
+        Assert.Contains("  /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,\n", ArgParser.UsageText);
+        Assert.Contains("                      999MB, 2GB (default: 1GB)\n", ArgParser.UsageText);
+        Assert.Contains("  /confirm            With /purge: really delete. Deletes are permanent\n", ArgParser.UsageText);
+        Assert.Contains("Purge examples:\n  dirused D:\\ /largest *.log /purge\n", ArgParser.UsageText);
+        Assert.Contains("      Delete the listed .log files of 1GB or more not modified in the last day\n", ArgParser.UsageText);
+        Assert.Contains("  dirused D:\\ /largest *.log /purge /minsize 100MB\n", ArgParser.UsageText);
+    }
+
+    private static T Property<T>(object value, string name) => (T)value.GetType().GetProperty(name)!.GetValue(value)!;
+
     [Theory]
-    [InlineData("/purge", "not available yet (M2)")]
     [InlineData("/monitor", "not available yet (M3)")]
     [InlineData("/threshold", "not available yet (M3)")]
     [InlineData("/gui", "not available yet (GUI)")]

@@ -17,7 +17,8 @@ public static class Program
     public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
     public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares) => RunCore(args, output, error, nodeShares, null, "0.0.0-dev");
     public static int RunWithReleaseSource(string[] args, TextWriter output, TextWriter error, IReleaseSource source, string version, string? updateStatePath = null) => RunCore(args, output, error, null, source, version, updateStatePath);
-    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null)
+    public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs);
+    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null)
     {
         if (source != null) CleanupUpdateFiles();
         if (args.Length == 1 && ArgParser.IsFlag(args[0], "version")) { output.WriteLine($"dirused {version} ({System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier})"); return 0; }
@@ -49,11 +50,21 @@ public static class Program
         }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
+        if (options.Purge && !OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
+        string effectivePurgeLog = purgeLogPath ?? PurgeLog.DefaultPath;
+        if (options.Purge && options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
+        StreamWriter? purgeLog = null;
+        if (options.Purge && options.Confirm)
+        {
+            try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(effectivePurgeLog))!); purgeLog = new StreamWriter(new FileStream(effectivePurgeLog, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true }; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException) { error.WriteLine($"Cannot open purge log '{effectivePurgeLog}': {ex.Message}; nothing was scanned or deleted"); return 1; }
+        }
         StreamWriter? fileWriter = null;
         string? reportPath = null;
         string fullPath = "";
         if (options.Output != null && !ReportOutput.TryOpen(options.Output, out fileWriter, out fullPath, out var openError))
         {
+            purgeLog?.Dispose();
             error.WriteLine(openError);
             return 1;
         }
@@ -81,10 +92,16 @@ public static class Program
                 .ToList();
             if (options.Summary && (options.Format != OutputFormat.Csv || options.Html))
                 results = TopFolders.Attach(targets, results, (t, token) => RemoteScan.Scan(byTarget[t], 1, false, token, options.Largest == null ? null : new LargestCollector(options.LargestCount, options.Largest)), new RunOptions(options.Parallel, options.Timeout ?? TopFolders.DefaultTimeout), cts.Token).ToList();
+            PurgeRun? purgeRun = null;
+            if (options.Purge)
+            {
+                purgeRun = Purge.Apply(results, options.PurgeDays, options.PurgeMinBytes, options.Confirm, purgeFs ?? new RealPurgeFileSystem(), () => DateTime.UtcNow, options.Confirm ? line => purgeLog!.WriteLine(line) : null, cts.Token, effectivePurgeLog);
+                results = purgeRun.Results.ToList();
+            }
             IRenderer renderer = options.Format switch
             {
                 OutputFormat.Json => new JsonRenderer(options.Summary),
-                OutputFormat.Csv => new CsvRenderer(options.Summary, options.Warn, options.Crit),
+                OutputFormat.Csv => new CsvRenderer(options.Summary, options.Warn, options.Crit, options.Purge),
                 _ => options.Summary ? new SummaryRenderer(options.Warn, options.Crit, options.Format == OutputFormat.Text && ReferenceEquals(renderOutput, Console.Out)) : new TextRenderer(options.Top, options.Exact, warn: options.Warn, crit: options.Crit, color: options.Format == OutputFormat.Text && ReferenceEquals(renderOutput, Console.Out))
             };
             TextWriter destination = options.Html ? output : renderOutput;
@@ -106,15 +123,21 @@ public static class Program
                 error.WriteLine($"HTML report: {reportPath}");
             }
             else if (fileWriter != null) error.WriteLine($"Report: {reportPath}");
+            if (purgeRun != null)
+            {
+                if (options.Confirm) error.WriteLine($"Purge: deleted {purgeRun.Deleted} file(s), {Format.Size(purgeRun.DeletedBytes)} freed; {purgeRun.Skipped} skipped; {purgeRun.Failed} failed; {purgeRun.NotAttempted} not attempted. Log: {effectivePurgeLog}");
+                else error.WriteLine($"Purge dry run: {purgeRun.WouldDelete} file(s), {Format.Size(purgeRun.WouldDeleteBytes)} would be deleted; {purgeRun.Skipped} skipped" + (purgeRun.Failed == 0 ? "" : $"; {purgeRun.Failed} could not be checked") + ". Add /confirm to delete them.");
+            }
             if (updateCheck != null) updateChecker!.WaitAfterReport(updateCheck, TimeSpan.FromSeconds(1));
             if (results.Any(r => r.Level == FullnessLevel.Crit)) return 4;
-            return results.Any(r => !r.Complete) ? 3 : 0;
+            return results.Any(r => !r.Complete) || purgeRun is { Failed: > 0 } or { NotAttempted: > 0 } ? 3 : 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception or System.Security.SecurityException) { error.WriteLine(ex.Message); return 1; }
         finally
         {
             Console.CancelKeyPress -= cancelHandler;
             fileWriter?.Dispose();
+            purgeLog?.Dispose();
         }
     }
 
