@@ -42,12 +42,17 @@ public class ProgramPurgeTests
                 int dryCode = Program.RunWithPurge(new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB" }, output, error, log);
                 Assert.Equal(dryBaseline, dryCode);
                 Assert.Contains("[would delete]", output.ToString()); Assert.True(File.Exists(small)); Assert.True(File.Exists(big)); Assert.False(File.Exists(log));
-                var dryRows = output.ToString().Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                string dryText = output.ToString();
+                var dryRows = dryText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
                     .SkipWhile(line => !line.StartsWith("Largest candidate files", StringComparison.Ordinal)).Skip(1)
                     .TakeWhile(line => line.StartsWith("  ", StringComparison.Ordinal)).ToArray();
-                string bRow = dryRows.Single(line => line.EndsWith(Path.DirectorySeparatorChar + "b.log", StringComparison.Ordinal) || line.Contains(Path.DirectorySeparatorChar + "b.log [", StringComparison.Ordinal));
-                string bigRow = dryRows.Single(line => line.Contains(Path.DirectorySeparatorChar + "big.log", StringComparison.Ordinal));
-                string aRow = dryRows.Single(line => line.Contains(Path.DirectorySeparatorChar + "a.log", StringComparison.Ordinal));
+                string Row(string name)
+                {
+                    var matches = dryRows.Where(line => line.Contains(Path.DirectorySeparatorChar + name, StringComparison.Ordinal)).ToArray();
+                    Assert.True(matches.Length == 1, $"expected one largest row for {name}, got {matches.Length}; report:\n{dryText}");
+                    return matches[0];
+                }
+                string bRow = Row("b.log"); string bigRow = Row("big.log"); string aRow = Row("a.log");
                 Assert.Contains("[skipped: modified within 1 day(s)]", bRow); Assert.Contains("[would delete]", bigRow); Assert.Contains("[would delete]", aRow);
             }
             using (var output = new StringWriter()) using (var error = new StringWriter())
