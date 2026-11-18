@@ -43,11 +43,13 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
             string cls = level == "" ? "" : $" class=\"{level.ToLowerInvariant()}\"";
             string levelCell = level == "" ? "" : "<span class=\"lvl\">" + level + "</span>";
             string pct = v.PercentUsed.ToString("F1", CultureInfo.InvariantCulture);
-            string bar = Math.Clamp(v.PercentUsed, 0, 100).ToString("0.##", CultureInfo.InvariantCulture);
+            double clampedPercent = Math.Clamp(v.PercentUsed, 0, 100);
+            string bar = clampedPercent.ToString("0.##", CultureInfo.InvariantCulture);
+            string barFill = clampedPercent == 0 ? "" : $"<span style=\"width:{bar}%\"></span>";
             var folders = summary
                 ? r.TopFoldersNote != null ? $"incomplete: {E(r.TopFoldersNote)}" : string.Join("<br>", r.Directories.OrderByDescending(e => e.LogicalBytes).ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(TopFolders.Count).Select(e => $"{E(Format.Size(e.LogicalBytes))} {E(e.Path)}"))
                 : "";
-            output.WriteLine($"<tr{cls}><td>{E(Host(r))}</td><td>{E(string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive)}</td><td class=\"num\">{E(Format.Size(v.UsedBytes))}</td><td class=\"num\">{E(Format.Size(v.FreeBytes))}</td><td class=\"num\">{E(Format.Size(v.TotalBytes))}</td><td class=\"num\">{E(pct)}% <span class=\"bar\"><span style=\"width:{bar}%\"></span></span></td><td>{levelCell}</td><td>{folders}</td></tr>");
+            output.WriteLine($"<tr{cls}><td>{E(Host(r))}</td><td>{E(string.IsNullOrEmpty(v.Drive) ? r.Target : v.Drive)}</td><td class=\"num\">{E(Format.Size(v.UsedBytes))}</td><td class=\"num\">{E(Format.Size(v.FreeBytes))}</td><td class=\"num\">{E(Format.Size(v.TotalBytes))}</td><td class=\"num\">{E(pct)}% <span class=\"bar\">{barFill}</span></td><td>{levelCell}</td><td>{folders}</td></tr>");
         }
         output.WriteLine("</tbody></table></div>");
 
