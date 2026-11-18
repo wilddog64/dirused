@@ -134,6 +134,26 @@ public sealed class HtmlRendererTests
         Assert.Contains(".bar>span{display:block;height:100%;min-width:3px;", writer.ToString());
     }
 
+    [Fact]
+    public void H20_ZeroFillDrawsNoSliver()
+    {
+        var zeroPercent = R(@"\\srv1\c$", 0);
+        var zeroTotal = R(@"\\srv2\c$", 0) with { Volume = new Volume(@"C:\", 0, 0, 0, 0) };
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, new[] { zeroPercent, zeroTotal, R(@"\\srv3\c$", 1) });
+        var html = writer.ToString();
+        var volumes = html.Substring(html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal));
+
+        foreach (var host in new[] { "srv1", "srv2" })
+        {
+            var row = volumes.Split("</tr>", StringSplitOptions.None).Single(row => row.Contains($"<td>{host}</td>", StringComparison.Ordinal));
+            Assert.Contains("<span class=\"bar\"></span>", row);
+            Assert.DoesNotContain("<span class=\"bar\"><span", row);
+        }
+
+        Assert.Contains("<span class=\"bar\"><span style=\"width:1%\"></span></span>", volumes);
+    }
+
     private static ScanResult R(string target, double percent) => new(target,
         new Volume(target.EndsWith("d$", StringComparison.OrdinalIgnoreCase) ? @"D:\" : @"C:\", (long)(percent * 100), (long)((100 - percent) * 100), 10000, percent),
         new() { new Entry("folder", 10, 10) }, new(), new(), true);
