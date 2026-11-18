@@ -12,7 +12,9 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
-- Update notice also appears on a bare `dirused` and `/help`, once per new version.
+- `/file` followed by another switch now says the file name is missing. The update notice also says how to stop checking and links the release notes.
+- The update notice now repeats on each run until you update (was once per version).
+- Update notice also appears on a bare `dirused` and `/help`.
 - `/html` report: OK volumes show a green bar and OK label; small usage stays visible.
 
 ## [v0.0.10] - 2026-11-17

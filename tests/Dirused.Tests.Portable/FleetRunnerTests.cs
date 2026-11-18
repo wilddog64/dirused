@@ -26,7 +26,7 @@ public sealed class FleetRunnerTests : IDisposable
         var utf8Bom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
         File.WriteAllText(file, "\n# comment line\n  C:\\b  \n\n   # indented comment\nD:\\c\n", utf8Bom);
 
-        var parsed = ArgParser.Parse(new[] { "C:\\a", "/file", file });
+        var parsed = ArgParser.Parse(new[] { "C:\\a", "/file", Path.GetRelativePath(Directory.GetCurrentDirectory(), file) });
         Assert.Null(parsed.Error);
         var opts = Assert.IsType<Options>(parsed.Options);
         Assert.Equal(new[] { "C:\\a", "C:\\b", "D:\\c" }, opts.Targets);
@@ -36,7 +36,7 @@ public sealed class FleetRunnerTests : IDisposable
     public void E1_MissingTargetFileReturnsErrorNamingIt()
     {
         string missing = Path.Combine(tempDir, "does-not-exist.txt");
-        var parsed = ArgParser.Parse(new[] { "/file", missing });
+        var parsed = ArgParser.Parse(new[] { "/file", Path.GetRelativePath(Directory.GetCurrentDirectory(), missing) });
         Assert.Null(parsed.Options);
         Assert.NotNull(parsed.Error);
         Assert.Contains("does-not-exist.txt", parsed.Error);

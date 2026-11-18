@@ -125,7 +125,7 @@ Sample `targets.txt`:
 When a scan is stopped by a timeout or cancellation, its errors name the folder in progress as `<path>: not finished: scan stopped`.
 If `System Volume Information` at a volume root cannot be read, output labels it `<path>: system only (not counted)`; its usage is included in the volume's used figure.
 
-Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets.
+Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. A path beginning with `/` or a file name beginning with `-` must be written as `\lists\servers.txt` or `.\-servers.txt`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets.
 
 The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not given) and never affects the exit code.
 
@@ -134,7 +134,7 @@ The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not gi
 Apache License 2.0. See [LICENSE](LICENSE).
 # Updates
 
-dirused checks GitHub at most once a day on a scan, a bare `dirused` or `/help`, and prints a one-line notice to stderr once for each newer version. Checks are silent on failure and never change scan output or status. Disable checks with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`.
+dirused checks GitHub at most once a day on a scan, a bare `dirused` or `/help`, and prints a short notice (the new version, how to update, how to stop checking and a release-notes link) to stderr on each run while a newer version exists; stop it with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`. Checks are silent on failure and never change scan output or status.
 
 Run `dirused /version` to see the installed version. `dirused /update` downloads the newest release for this architecture and checks its SHA-256 before replacing `dirused.exe`; updates are never installed automatically. The checksum and executable come from the same GitHub release, so this detects download corruption but does not independently authenticate the publisher. HTTPS certificate validation remains enabled.
 

@@ -18,11 +18,12 @@ public class ArgParserTests
         File.WriteAllText(file, @"C:\" + Environment.NewLine);
         try
         {
-            var a2 = ArgParser.Parse(new[] { "/summary", "/crit", "/warn", "/file", file });
+            var fileArgument = Path.GetRelativePath(Directory.GetCurrentDirectory(), file);
+            var a2 = ArgParser.Parse(new[] { "/summary", "/crit", "/warn", "/file", fileArgument });
             Assert.Null(a2.Error);
             Assert.Equal(85, a2.Options!.Warn);
             Assert.Equal(90, a2.Options.Crit);
-            Assert.Equal(file, a2.Options.File);
+            Assert.Equal(fileArgument, a2.Options.File);
             Assert.True(a2.Options.Summary);
         }
         finally { File.Delete(file); }
@@ -58,6 +59,35 @@ public class ArgParserTests
         var result = ArgParser.Parse(new[] { target });
         Assert.Null(result.Error);
         Assert.Contains(target, Assert.IsType<Options>(result.Options).Targets);
+    }
+
+    [Fact]
+    public void FileFollowedBySwitchIsRejected()
+    {
+        var slashSwitch = ArgParser.Parse(new[] { "/summary", "/file", "/html", "server-list.txt" });
+        Assert.Contains("/file requires a file name", slashSwitch.Error);
+        Assert.Contains("'/html'", slashSwitch.Error);
+        var dashSwitch = ArgParser.Parse(new[] { "/file", "-json", "x.txt" });
+        Assert.Contains("/file requires a file name", dashSwitch.Error);
+        Assert.Contains("'-json'", dashSwitch.Error);
+
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-file-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(scratch);
+        var file = Path.Combine(scratch, "servers.list");
+        Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase);
+        File.WriteAllText(file, "localhost" + Environment.NewLine);
+        try
+        {
+            var fileArgument = Path.GetRelativePath(Directory.GetCurrentDirectory(), file);
+            var valid = ArgParser.Parse(new[] { "/file", fileArgument, "/html" });
+            Assert.Null(valid.Error);
+            Assert.Equal(fileArgument, valid.Options!.File);
+            Assert.True(valid.Options.Html);
+            Assert.StartsWith("Cannot read target file '", ArgParser.Parse(new[] { "/file", @"\\nohost\share\list.txt" }).Error);
+            Assert.StartsWith("Cannot read target file '", ArgParser.Parse(new[] { "/file", "//nohost/share/list.txt" }).Error);
+            Assert.Equal("/file requires a path", ArgParser.Parse(new[] { "/file" }).Error);
+        }
+        finally { Directory.Delete(scratch, true); }
     }
 
     [Fact]

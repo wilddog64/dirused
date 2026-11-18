@@ -16,19 +16,48 @@ public sealed class UpdateTests
         Assert.Equal("0.0.9", ReleaseSelector.Select(new[] { Release("v0.0.9", "win-x64") }, "win-x64")?.Version); // positive control: prereleases are eligible
     }
 
-    [Fact] public async Task U2_NoticeIsStderrOnlyOncePerVersion()
+    [Fact] public async Task U2_NoticeIsStderrOnlyAndRepeatsUntilUpdated()
     {
         var scratch = Scratch(); try { var source = new FakeSource { Package = Package() }; var error = new StringWriter(); var stdout = new StringWriter(); var now = DateTimeOffset.UtcNow; var check = Checker(source, error, scratch, () => now);
             await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString()); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Empty(stdout.ToString());
-            error.GetStringBuilder().Clear(); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString());
-            now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Empty(error.ToString());
+            error.GetStringBuilder().Clear(); now = now.AddHours(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            error.GetStringBuilder().Clear(); now = now.AddHours(23).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
             source.Package = Package(version: "0.0.12"); now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(3, source.FindCalls); Assert.Contains("dirused 0.0.12 is available", error.ToString());
             var off = new StringWriter(); var noCheck = Checker(new FakeSource { Package = Package() }, off, Path.Combine(scratch, "off"), () => now); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); try { await noCheck.CheckAsync(); } finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null); }
             Assert.Empty(off.ToString());
         } finally { Directory.Delete(scratch, true); }
     }
 
-    [Fact] public async Task U18_NoticeOncePerVersionSurvivesRestart()
+    [Fact] public async Task NoticeHasStopAndReleaseNotesLines()
+    {
+        var scratch = Scratch();
+        try
+        {
+            var error = new StringWriter(); var stdout = new StringWriter(); var now = DateTimeOffset.UtcNow;
+            var check = Checker(new FakeSource { Package = Package(version: "0.0.11") }, error, scratch, () => now);
+            await check.CheckAsync();
+            check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
+            var lines = error.ToString().TrimEnd().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            Assert.Equal(new[]
+            {
+                "dirused 0.0.11 is available (you have 0.0.10). Run: dirused /update",
+                "  To stop checking, add /noupdatecheck or set DIRUSED_NO_UPDATE_CHECK=1.",
+                "  Release notes: https://github.com/wilddog64/dirused/releases/tag/v0.0.11"
+            }, lines);
+            Assert.Empty(stdout.ToString());
+            error.GetStringBuilder().Clear();
+            await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
+            Assert.Equal(new[]
+            {
+                "dirused 0.0.11 is available (you have 0.0.10). Run: dirused /update",
+                "  To stop checking, add /noupdatecheck or set DIRUSED_NO_UPDATE_CHECK=1.",
+                "  Release notes: https://github.com/wilddog64/dirused/releases/tag/v0.0.11"
+            }, error.ToString().TrimEnd().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None));
+        }
+        finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U18_NoticeRepeatsAcrossRestart()
     {
         var scratch = Scratch(); try
         {
@@ -38,7 +67,7 @@ public sealed class UpdateTests
             error.GetStringBuilder().Clear(); now = now.AddHours(48);
             var restarted = new UpdateCheck(new FakeSource { Package = Package() }, error, path, "0.0.10", "win-x64", () => now);
             await restarted.CheckAsync(); restarted.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
-            Assert.Empty(error.ToString()); Assert.Equal("0.0.11", UpdateState.Read(path, now).NoticedVersion);
+            Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Null(UpdateState.Read(path, now).NoticedVersion);
         } finally { Directory.Delete(scratch, true); }
     }
 
@@ -50,8 +79,23 @@ public sealed class UpdateTests
             File.WriteAllText(path, "{\"AttemptedUtc\":null,\"Latest\":\"0.0.11\",\"NoticedUtc\":null}");
             var error = new StringWriter(); var check = new UpdateCheck(new FakeSource { Package = null }, error, path, "0.0.10", "win-x64", () => now);
             await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
-            Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Equal("0.0.11", UpdateState.Read(path, now).NoticedVersion);
+            Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Null(UpdateState.Read(path, now).NoticedVersion);
         } finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U21_NoticeStopsOnceUpToDate()
+    {
+        var scratch = Scratch();
+        try
+        {
+            var path = Path.Combine(scratch, "state.json"); var now = DateTimeOffset.UtcNow;
+            new UpdateState(now, "0.0.11", null).Write(path);
+            var currentError = new StringWriter(); var current = new UpdateCheck(new FakeSource { Package = null }, currentError, path, "0.0.11", "win-x64", () => now);
+            await current.CheckAsync(); current.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Empty(currentError.ToString());
+            var olderError = new StringWriter(); var older = new UpdateCheck(new FakeSource { Package = null }, olderError, path, "0.0.10", "win-x64", () => now);
+            await older.CheckAsync(); older.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", olderError.ToString());
+        }
+        finally { Directory.Delete(scratch, true); }
     }
 
     [Fact] public async Task U3_FailedCheckIsSilentAndPreservesLatest()
