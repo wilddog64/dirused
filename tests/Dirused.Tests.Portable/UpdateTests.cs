@@ -20,12 +20,43 @@ public sealed class UpdateTests
     {
         var scratch = Scratch(); try { var source = new FakeSource { Package = Package() }; var error = new StringWriter(); var stdout = new StringWriter(); var now = DateTimeOffset.UtcNow; var check = Checker(source, error, scratch, () => now);
             await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString()); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Empty(stdout.ToString());
-            error.GetStringBuilder().Clear(); now = now.AddHours(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            error.GetStringBuilder().Clear(); now = now.AddMinutes(10); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
             error.GetStringBuilder().Clear(); now = now.AddHours(23).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
             source.Package = Package(version: "0.0.12"); now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(3, source.FindCalls); Assert.Contains("dirused 0.0.12 is available", error.ToString());
             var off = new StringWriter(); var noCheck = Checker(new FakeSource { Package = Package() }, off, Path.Combine(scratch, "off"), () => now); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); try { await noCheck.CheckAsync(); } finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null); }
             Assert.Empty(off.ToString());
         } finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U22_LookupWindowIs15Minutes()
+    {
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        var scratch = Scratch();
+        try
+        {
+            var now = DateTimeOffset.UtcNow; var source = new FakeSource { Package = Package() }; var checker = Checker(source, new StringWriter(), scratch, () => now);
+            await checker.CheckAsync(); Assert.Equal(1, source.FindCalls);
+            now = now.AddMinutes(14).AddSeconds(59); await checker.CheckAsync(); Assert.Equal(1, source.FindCalls);
+            now = now.AddSeconds(2); await checker.CheckAsync(); Assert.Equal(2, source.FindCalls);
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U23_ForceLooksUpInsideTheWindow()
+    {
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        var scratch = Scratch();
+        try
+        {
+            var now = DateTimeOffset.UtcNow; var source = new FakeSource { Package = Package() }; var checker = Checker(source, new StringWriter(), scratch, () => now);
+            await checker.CheckAsync(); Assert.Equal(1, source.FindCalls);
+            await checker.CheckAsync(); Assert.Equal(1, source.FindCalls);
+            source.Package = Package(version: "0.0.12"); await checker.CheckAsync(force: true); Assert.Equal(2, source.FindCalls);
+            var error = new StringWriter(); var forced = Checker(new FakeSource { Package = Package(version: "0.0.12") }, error, Path.Combine(scratch, "forced"), () => now);
+            await forced.CheckAsync(); await forced.CheckAsync(force: true); forced.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.12 is available", error.ToString());
+            Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); await checker.CheckAsync(force: true); Assert.Equal(2, source.FindCalls);
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
     }
 
     [Fact] public async Task NoticeHasStopAndReleaseNotesLines()

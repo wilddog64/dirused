@@ -34,7 +34,7 @@ public static class Program
         }
         if (args.Length == 0)
         {
-            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath);
+            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath, false);
             error.WriteLine(ArgParser.ShortUsageText);
             checker?.WaitAfterReport(check, TimeSpan.FromSeconds(1));
             return 1;
@@ -42,7 +42,7 @@ public static class Program
         var parsed = ArgParser.Parse(args);
         if (parsed.Usage)
         {
-            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath);
+            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath, true);
             output.WriteLine(ArgParser.UsageText);
             checker?.WaitAfterReport(check, TimeSpan.FromSeconds(1));
             return 0;
@@ -72,7 +72,7 @@ public static class Program
             Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
                 ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
                 : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token, options.Largest == null ? null : new LargestCollector(options.LargestCount, options.Largest));
-            var (updateCheck, updateChecker) = StartUpdateCheck(args, error, source, version, updateStatePath);
+            var (updateCheck, updateChecker) = StartUpdateCheck(args, error, source, version, updateStatePath, false);
             var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
                 .Select(x => options.Format == OutputFormat.Text
                     ? x.Result
@@ -118,11 +118,11 @@ public static class Program
         }
     }
 
-    private static (Task? Check, UpdateCheck? Checker) StartUpdateCheck(string[] args, TextWriter error, IReleaseSource? source, string version, string? updateStatePath)
+    private static (Task? Check, UpdateCheck? Checker) StartUpdateCheck(string[] args, TextWriter error, IReleaseSource? source, string version, string? updateStatePath, bool force)
     {
         if (source == null || args.Any(a => ArgParser.IsFlag(a, "noupdatecheck")) || GitHubReleaseSource.Parse(version) == null || Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK") == "1") return (null, null);
         var checker = new UpdateCheck(source, error, updateStatePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dirused", "update-check.json"), version, RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64");
-        return (checker.CheckAsync(), checker);
+        return (checker.CheckAsync(force), checker);
     }
 
     private static void CleanupUpdateFiles()

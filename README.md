@@ -76,6 +76,7 @@ Pass a plain list to replace the defaults (`/largest "*.hprof;*.dmp"`), a `+` li
 (`/largest "+*.trc2;+*.out2"`), or `*` to include every file. A single exact name needs a trailing semicolon,
 for example `/largest "catalina.out;"`. In Windows, write a relative folder whose name starts with `+` as `.\+name` so `/largest` does not consume it as a pattern.
 dirused only lists candidates; it never deletes or opens files.
+In the HTML report, files of 10 GB or more are red, 1 GB or more amber, and each row has a bar scaled to the largest file in its group.
 
 ### Switches
 
@@ -134,7 +135,7 @@ The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not gi
 Apache License 2.0. See [LICENSE](LICENSE).
 # Updates
 
-dirused checks GitHub at most once a day on a scan, a bare `dirused` or `/help`, and prints a short notice (the new version, how to update, how to stop checking and a release-notes link) to stderr on each run while a newer version exists; stop it with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`. Checks are silent on failure and never change scan output or status.
+dirused checks GitHub at most every 15 minutes (always on `/help`) on a scan or a bare `dirused`, and prints a short notice (the new version, how to update, how to stop checking and a release-notes link) to stderr on each run while a newer version exists; stop it with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`. Checks are silent on failure and never change scan output or status.
 
 Run `dirused /version` to see the installed version. `dirused /update` downloads the newest release for this architecture and checks its SHA-256 before replacing `dirused.exe`; updates are never installed automatically. The checksum and executable come from the same GitHub release, so this detects download corruption but does not independently authenticate the publisher. HTTPS certificate validation remains enabled.
 

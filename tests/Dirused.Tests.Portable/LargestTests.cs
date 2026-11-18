@@ -66,4 +66,26 @@ public sealed class LargestTests
         Assert.Equal(1, summaryHtml.ToString().Split("<tr class=\"group\">").Length - 1);
         Assert.Contains(@"C:\", summaryHtml.ToString()); Assert.DoesNotContain(@"D:\", summaryHtml.ToString().Split("<h2>Largest candidate files</h2>")[1]);
     }
+
+    [Fact]
+    public void HtmlLargestRowsColoredAndBarred()
+    {
+        const long gb = 1024L * 1024 * 1024;
+        ScanResult Result(string target, params long[] sizes) => new(target, new Volume("C:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            Largest = new LargestFiles(new[] { "*.log" }, sizes.Length, sizes.Sum(), sizes.Select((size, i) => new LargestFile($"{target}file{i}.log", size, DateTime.UtcNow)).ToList(), true)
+        };
+        using var html = new StringWriter();
+        new HtmlRenderer(false, 85, 90, 50).Render(html, new[] { Result(@"C:\", 10L * gb, 10L * gb - 1, gb, gb - 1), Result(@"D:\", 2 * gb, gb), Result(@"E:\", 0, 0) });
+        var output = html.ToString();
+        var section = output.Split("<h2>Largest candidate files</h2>")[1];
+        var rows = section.Split("</tr>", StringSplitOptions.None).Where(row => row.Contains("<td class=\"num\">", StringComparison.Ordinal)).ToArray();
+        Assert.Contains(" class=\"crit\"", rows[0]); Assert.Contains("width:100%", rows[0]);
+        Assert.Contains(" class=\"warn\"", rows[1]); Assert.Contains(" class=\"warn\"", rows[2]); Assert.Contains("width:10%", rows[2]);
+        Assert.DoesNotContain("class=\"crit\"", rows[3]);
+        Assert.All(rows.Take(6), row => Assert.Contains("class=\"date\"", row));
+        Assert.Contains("td.date{white-space:nowrap}", output);
+        Assert.Contains("width:100%", rows[4]);
+        Assert.DoesNotContain("NaN", rows[6] + rows[7]); Assert.DoesNotContain("style=\"width:", rows[6] + rows[7]);
+    }
 }

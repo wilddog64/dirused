@@ -12,6 +12,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- Update lookup every 15 minutes (was daily) and always on `/help`. HTML largest-files rows are colored by size and show a size bar.
 - `/file` followed by another switch now says the file name is missing. The update notice also says how to stop checking and links the release notes.
 - The update notice now repeats on each run until you update (was once per version).
 - Update notice also appears on a bare `dirused` and `/help`.

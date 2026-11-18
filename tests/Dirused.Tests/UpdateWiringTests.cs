@@ -98,6 +98,21 @@ public sealed class UpdateWiringTests
         finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
     }
 
+    [Fact]
+    public void W7_HelpAlwaysLooksUpBareRunHonoursWindow()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-w7-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        try
+        {
+            var state = Path.Combine(scratch, "state.json"); var source = new FakeSource();
+            Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), new StringWriter(), new StringWriter(), source, "0.0.10", state)); Assert.Equal(1, source.FindCalls);
+            Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), new StringWriter(), new StringWriter(), source, "0.0.10", state)); Assert.Equal(1, source.FindCalls);
+            Assert.Equal(0, Program.RunWithReleaseSource(new[] { "/help" }, new StringWriter(), new StringWriter(), source, "0.0.10", state)); Assert.Equal(2, source.FindCalls);
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
+    }
+
     private sealed class FakeSource : IReleaseSource
     {
         public int FindCalls, DownloadCalls;
