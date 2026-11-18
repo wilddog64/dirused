@@ -16,14 +16,41 @@ public sealed class UpdateTests
         Assert.Equal("0.0.9", ReleaseSelector.Select(new[] { Release("v0.0.9", "win-x64") }, "win-x64")?.Version); // positive control: prereleases are eligible
     }
 
-    [Fact] public async Task U2_NoticeIsStderrOnlyOncePerDayAndPositiveControlShowsIt()
+    [Fact] public async Task U2_NoticeIsStderrOnlyOncePerVersion()
     {
         var scratch = Scratch(); try { var source = new FakeSource { Package = Package() }; var error = new StringWriter(); var stdout = new StringWriter(); var now = DateTimeOffset.UtcNow; var check = Checker(source, error, scratch, () => now);
             await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString()); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Empty(stdout.ToString());
             error.GetStringBuilder().Clear(); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString());
-            now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Empty(error.ToString());
+            source.Package = Package(version: "0.0.12"); now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(3, source.FindCalls); Assert.Contains("dirused 0.0.12 is available", error.ToString());
             var off = new StringWriter(); var noCheck = Checker(new FakeSource { Package = Package() }, off, Path.Combine(scratch, "off"), () => now); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); try { await noCheck.CheckAsync(); } finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null); }
             Assert.Empty(off.ToString());
+        } finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U18_NoticeOncePerVersionSurvivesRestart()
+    {
+        var scratch = Scratch(); try
+        {
+            var path = Path.Combine(scratch, "state.json"); var now = DateTimeOffset.UtcNow; var error = new StringWriter();
+            var first = new UpdateCheck(new FakeSource { Package = Package() }, error, path, "0.0.10", "win-x64", () => now);
+            await first.CheckAsync(); first.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            error.GetStringBuilder().Clear(); now = now.AddHours(48);
+            var restarted = new UpdateCheck(new FakeSource { Package = Package() }, error, path, "0.0.10", "win-x64", () => now);
+            await restarted.CheckAsync(); restarted.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
+            Assert.Empty(error.ToString()); Assert.Equal("0.0.11", UpdateState.Read(path, now).NoticedVersion);
+        } finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U19_OldStateFileStillReads()
+    {
+        var scratch = Scratch(); try
+        {
+            var path = Path.Combine(scratch, "state.json"); var now = DateTimeOffset.UtcNow;
+            File.WriteAllText(path, "{\"AttemptedUtc\":null,\"Latest\":\"0.0.11\",\"NoticedUtc\":null}");
+            var error = new StringWriter(); var check = new UpdateCheck(new FakeSource { Package = null }, error, path, "0.0.10", "win-x64", () => now);
+            await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1));
+            Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Equal("0.0.11", UpdateState.Read(path, now).NoticedVersion);
         } finally { Directory.Delete(scratch, true); }
     }
 

@@ -116,7 +116,7 @@ The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not gi
 Apache License 2.0. See [LICENSE](LICENSE).
 # Updates
 
-dirused checks GitHub at most once a day and prints a one-line update notice to stderr. Checks are silent on failure and never change scan output or status. Disable checks with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`.
+dirused checks GitHub at most once a day on a scan, a bare `dirused` or `/help`, and prints a one-line notice to stderr once for each newer version. Checks are silent on failure and never change scan output or status. Disable checks with `/noupdatecheck` or `DIRUSED_NO_UPDATE_CHECK=1`.
 
 Run `dirused /version` to see the installed version. `dirused /update` downloads the newest release for this architecture and checks its SHA-256 before replacing `dirused.exe`; updates are never installed automatically. The checksum and executable come from the same GitHub release, so this detects download corruption but does not independently authenticate the publisher. HTTPS certificate validation remains enabled.
 

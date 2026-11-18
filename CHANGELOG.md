@@ -11,6 +11,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- Update notice also appears on a bare `dirused` and `/help`, once per new version.
 - `/html` report: OK volumes show a green bar and OK label; small usage stays visible.
 
 ## [v0.0.10] - 2026-11-17

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Dirused.Common.Update;
 
-public sealed record UpdateState(DateTimeOffset? AttemptedUtc, string? Latest, DateTimeOffset? NoticedUtc)
+public sealed record UpdateState(DateTimeOffset? AttemptedUtc, string? Latest, DateTimeOffset? NoticedUtc, string? NoticedVersion = null)
 {
     public static UpdateState Read(string path, DateTimeOffset now)
     {

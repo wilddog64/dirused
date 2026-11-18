@@ -46,9 +46,10 @@ public sealed class UpdateCheck
     private void PrintNotice(UpdateState state, DateTimeOffset now)
     {
         if (GitHubReleaseSource.Parse(state.Latest ?? "") is not { } latest || GitHubReleaseSource.Compare(latest, GitHubReleaseSource.Parse(_version)) <= 0) return;
-        if (state.NoticedUtc is { } noticed && now - noticed <= TimeSpan.FromHours(24)) return;
-        _error.WriteLine($"dirused {string.Join('.', latest)} is available (you have {_version}). Run: dirused /update");
-        TryWrite(state with { NoticedUtc = now });
+        var latestVersion = string.Join('.', latest);
+        if (state.NoticedVersion == latestVersion) return;
+        _error.WriteLine($"dirused {latestVersion} is available (you have {_version}). Run: dirused /update");
+        TryWrite(state with { NoticedUtc = now, NoticedVersion = latestVersion });
     }
 
     private void TryWrite(UpdateState state) { try { state.Write(_statePath); } catch { } }
