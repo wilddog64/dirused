@@ -17,7 +17,14 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet test tests/Dirused.Tests.Portable -c Release
-      - run: dotnet publish src/Dirused.Cli -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o out/${{ matrix.rid }}
+      - name: Publish
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+)$') {
+            dotnet publish src/Dirused.Cli -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true "-p:Version=$($Matches[1])" -o out/${{ matrix.rid }}
+          } else {
+            dotnet publish src/Dirused.Cli -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o out/${{ matrix.rid }}
+          }
       - name: Assemble zip
         shell: pwsh
         run: |
