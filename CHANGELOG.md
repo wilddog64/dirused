@@ -6,6 +6,9 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 
 ## [Unreleased]
 
+### Changed
+- `/html` report: OK volumes show a green bar and OK label; small usage stays visible.
+
 ## [v0.0.10] - 2026-11-17
 
 ### Changed
