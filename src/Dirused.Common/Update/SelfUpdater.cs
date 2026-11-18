@@ -27,9 +27,11 @@ public static class SelfUpdater
         string dir = Path.GetDirectoryName(exePath)!, lockPath = Path.Combine(dir, "dirused.update.lock"), stage = Path.Combine(dir, ".dirused-update"), old = exePath + ".old";
         var files = fileOperations ?? new PhysicalUpdateFileOperations();
         FileStream? held = null;
+        try { held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { error.WriteLine("Another update is running."); return 1; }
+        catch (Exception ex) { error.WriteLine(ex.Message); return 1; }
         try
         {
-            held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             files.CreateDirectory(stage);
             var package = await source.FindLatestAsync(version, rid);
             if (package == null) { error.WriteLine("No newer release with assets for this architecture was found."); return 1; }
@@ -50,7 +52,7 @@ public static class SelfUpdater
             output.WriteLine($"updated dirused {version} -> {package.Version}"); return 0;
         }
         catch (Exception ex) { error.WriteLine(ex.Message); return 1; }
-        finally { try { if (files.DirectoryExists(stage)) files.DeleteDirectory(stage, true); } catch { } held?.Dispose(); try { File.Delete(lockPath); } catch { } }
+        finally { try { if (files.DirectoryExists(stage)) files.DeleteDirectory(stage, true); } catch { } held.Dispose(); try { File.Delete(lockPath); } catch { } }
     }
     private static bool ValidAssetUrl(Uri uri) => uri.Scheme == Uri.UriSchemeHttps && uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) && uri.AbsolutePath.StartsWith("/wilddog64/dirused/releases/download/", StringComparison.Ordinal);
 }

@@ -5,6 +5,13 @@ using Dirused.Common.Targets;
 namespace Dirused.Common;
 public static class ArgParser
 {
+    public static bool IsFlag(string arg, string name)
+    {
+        if (string.IsNullOrEmpty(arg) || !(arg.StartsWith('/') && !arg.StartsWith("//", StringComparison.Ordinal) || arg.StartsWith('-'))) return false;
+        var flag = arg.TrimStart('/', '-');
+        return flag.Equals(name, StringComparison.OrdinalIgnoreCase);
+    }
+
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
         "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +

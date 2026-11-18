@@ -31,6 +31,25 @@ public sealed class UpdateWiringTests
         Assert.Equal(0, source.FindCalls); Assert.Equal(0, source.DownloadCalls);
     }
 
+    [Fact]
+    public void W3_BareWordsRemainScanTargetsAndPrefixedVersionWorks()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-w3-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
+        Assert.Equal(scratch, Path.GetFullPath(scratch));
+        try
+        {
+            foreach (var word in new[] { "update", "version" })
+            {
+                var output = new StringWriter(); var error = new StringWriter(); var source = new FakeSource();
+                var rc = Program.RunWithReleaseSource(new[] { word }, output, error, source, "0.0.10", Path.Combine(scratch, word + ".json"));
+                Assert.NotEqual(0, rc); Assert.DoesNotContain("dirused 0.0.", output.ToString()); Assert.Equal(0, source.FindCalls); Assert.Equal(0, source.DownloadCalls);
+            }
+            var versionOutput = new StringWriter(); Assert.Equal(0, Program.RunWithReleaseSource(new[] { "/version" }, versionOutput, new StringWriter(), new FakeSource(), "0.0.10"));
+            Assert.Contains("dirused 0.0.10", versionOutput.ToString());
+        }
+        finally { Directory.Delete(scratch, true); }
+    }
+
     private sealed class FakeSource : IReleaseSource
     {
         public int FindCalls, DownloadCalls;

@@ -19,9 +19,9 @@ public sealed class UpdateTests
     [Fact] public async Task U2_NoticeIsStderrOnlyOncePerDayAndPositiveControlShowsIt()
     {
         var scratch = Scratch(); try { var source = new FakeSource { Package = Package() }; var error = new StringWriter(); var stdout = new StringWriter(); var now = DateTimeOffset.UtcNow; var check = Checker(source, error, scratch, () => now);
-            await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Empty(stdout.ToString());
-            error.GetStringBuilder().Clear(); await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString());
-            now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); Assert.Equal(2, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            await check.CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString()); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Empty(stdout.ToString());
+            error.GetStringBuilder().Clear(); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(1, source.FindCalls); Assert.Empty(error.ToString());
+            now = now.AddHours(24).AddSeconds(1); await check.CheckAsync(); check.WaitAfterReport(Task.CompletedTask, TimeSpan.FromSeconds(1)); Assert.Equal(2, source.FindCalls); Assert.Contains("dirused 0.0.11 is available", error.ToString());
             var off = new StringWriter(); var noCheck = Checker(new FakeSource { Package = Package() }, off, Path.Combine(scratch, "off"), () => now); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); try { await noCheck.CheckAsync(); } finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null); }
             Assert.Empty(off.ToString());
         } finally { Directory.Delete(scratch, true); }
@@ -72,7 +72,7 @@ public sealed class UpdateTests
     { var good = Release("v0.0.11", "win-x64"); var picked = ReleaseSelector.Select(new[] { good, Release("v0.1.0-rc1", "win-x64"), Release("latest", "win-x64"), Release("0.0.12", "win-x64") }, "win-x64"); Assert.Equal("v0.0.11", picked?.Tag); }
 
     [Fact] public async Task U11_NeverReturningSourceDoesNotHoldScanBeyondGrace()
-    { var scratch = Scratch(); try { var error = new StringWriter(); var stdout = new StringWriter(); var source = new FakeSource { Never = true }; var check = Checker(source, error, scratch); var sw = System.Diagnostics.Stopwatch.StartNew(); var inFlight = check.CheckAsync(); await Task.Run(() => UpdateCheck.WaitAfterReport(inFlight, TimeSpan.FromSeconds(1))).WaitAsync(TimeSpan.FromSeconds(1.5)); sw.Stop(); Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1.5)); Assert.Empty(error.ToString()); Assert.Empty(stdout.ToString()); } finally { Directory.Delete(scratch, true); } }
+    { var scratch = Scratch(); try { var error = new StringWriter(); var stdout = new StringWriter(); var source = new FakeSource { Never = true }; var check = Checker(source, error, scratch); var sw = System.Diagnostics.Stopwatch.StartNew(); var inFlight = check.CheckAsync(); await Task.Run(() => check.WaitAfterReport(inFlight, TimeSpan.FromSeconds(1))).WaitAsync(TimeSpan.FromSeconds(1.5)); sw.Stop(); Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1.5)); Assert.Empty(error.ToString()); Assert.Empty(stdout.ToString()); } finally { Directory.Delete(scratch, true); } }
 
     [Fact] public async Task U12_ScanCheckListsReleaseButNeverDownloadsAssets()
     { var scratch = Scratch(); try { var source = new FakeSource { Package = Package() }; await Checker(source, new StringWriter(), scratch).CheckAsync(); Assert.Equal(1, source.FindCalls); Assert.Equal(0, source.DownloadCalls); } finally { Directory.Delete(scratch, true); } }
@@ -89,9 +89,40 @@ public sealed class UpdateTests
     [Fact] public async Task U14_CorruptFutureAndConcurrentStateFilesAreTreatedAsUnchecked()
     { var scratch = Scratch(); try { var path = Path.Combine(scratch, "state.json"); File.WriteAllText(path, "{"); var src = new FakeSource { Package = null }; await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(1, src.FindCalls); new UpdateState(DateTimeOffset.UtcNow.AddDays(2), null, null).Write(path); await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(2, src.FindCalls); var writer = Task.Run(() => { for (var i = 0; i < 20; i++) new UpdateState(DateTimeOffset.UtcNow, null, null).Write(path); }); var readers = Enumerable.Range(0, 20).Select(_ => Task.Run(() => UpdateState.Read(path, DateTimeOffset.UtcNow))).ToArray(); await writer; await Task.WhenAll(readers); } finally { Directory.Delete(scratch, true); } }
 
+    [Fact] public void U16_OnlyPrefixedWordsAreFlags()
+    {
+        foreach (var flag in new[] { "/update", "-update", "/UPDATE" }) Assert.True(Dirused.Common.ArgParser.IsFlag(flag, "update"));
+        foreach (var target in new[] { "update", "//update", "C:\\update", "/updates" }) Assert.False(Dirused.Common.ArgParser.IsFlag(target, "update"));
+    }
+
+    [Fact] public async Task U15_HeldLockLeavesOtherUpdatersFilesAlone()
+    {
+        var scratch = Scratch(); try
+        {
+            var exe = Path.Combine(scratch, "dirused.exe"); var original = new byte[] { 1, 2, 3 }; File.WriteAllBytes(exe, original);
+            var stage = Path.Combine(scratch, ".dirused-update"); Directory.CreateDirectory(stage); var staged = Path.Combine(stage, "dirused.exe"); File.WriteAllText(staged, "other updater");
+            var lockPath = Path.Combine(scratch, "dirused.update.lock"); using (var held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            {
+                var error = new StringWriter(); Assert.Equal(1, await SelfUpdater.RunAsync(NewSource(Zip(("dirused.exe", new byte[] { 9 }))), "0.0.10", "win-x64", exe, new StringWriter(), error));
+                Assert.Contains("Another update is running.", error.ToString()); Assert.True(File.Exists(staged)); Assert.True(File.Exists(lockPath)); Assert.Equal(original, File.ReadAllBytes(exe));
+            }
+        } finally { Directory.Delete(scratch, true); }
+    }
+
+    [Fact] public async Task U17_NoticeIsWrittenOnlyAfterWaitAndNeverAfterGrace()
+    {
+        var scratch = Scratch(); try
+        {
+            var error = new StringWriter(); var immediate = new FakeSource { Package = Package() }; var check = Checker(immediate, error, scratch);
+            var completed = check.CheckAsync(); await completed; Assert.Empty(error.ToString()); check.WaitAfterReport(completed, TimeSpan.FromSeconds(1)); Assert.Contains("dirused 0.0.11 is available", error.ToString());
+            error.GetStringBuilder().Clear(); var late = new DelayedSource(Package(), TimeSpan.FromSeconds(1.5)); var lateCheck = Checker(late, error, Path.Combine(scratch, "late"));
+            var pending = lateCheck.CheckAsync(); lateCheck.WaitAfterReport(pending, TimeSpan.FromSeconds(1)); await Task.Delay(TimeSpan.FromSeconds(1)); Assert.Empty(error.ToString());
+        } finally { Directory.Delete(scratch, true); }
+    }
+
     private static ReleaseInfo Release(string tag, string rid, bool draft = false, bool hash = true) { var zip = $"dirused-{tag}-{rid}.zip"; var assets = new List<ReleaseAsset> { new(zip, new Uri($"https://github.com/wilddog64/dirused/releases/download/{tag}/{zip}")) }; if (hash) assets.Add(new(zip + ".sha256", new Uri($"https://github.com/wilddog64/dirused/releases/download/{tag}/{zip}.sha256"))); return new(tag, draft, assets); }
     private static string Scratch() { var path = Path.Combine(Path.GetTempPath(), "dirused-update-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); Assert.Equal(path, Path.GetFullPath(path)); return path; }
-    private static UpdateCheck Checker(FakeSource source, TextWriter error, string dir, Func<DateTimeOffset>? clock = null, string version = "0.0.10") => new(source, error, Path.Combine(dir, "state.json"), version, "win-x64", clock);
+    private static UpdateCheck Checker(IReleaseSource source, TextWriter error, string dir, Func<DateTimeOffset>? clock = null, string version = "0.0.10") => new(source, error, Path.Combine(dir, "state.json"), version, "win-x64", clock);
     private static ReleasePackage Package(string? url = null, string version = "0.0.11") { var tag = "v" + version; var zip = $"dirused-{tag}-win-x64.zip"; return new(version, tag, "win-x64", new Uri(url ?? $"https://github.com/wilddog64/dirused/releases/download/{tag}/{zip}"), new Uri($"https://github.com/wilddog64/dirused/releases/download/{tag}/{zip}.sha256"), zip); }
     private static byte[] Zip(params (string Name, byte[] Bytes)[] entries) { using var ms = new MemoryStream(); using (var z = new ZipArchive(ms, ZipArchiveMode.Create, true)) foreach (var (name, bytes) in entries) { using var s = z.CreateEntry(name).Open(); s.Write(bytes); } return ms.ToArray(); }
     private static FakeSource NewSource(byte[] zip) { var s = new FakeSource { Package = Package(), Zip = zip }; s.HashText = Sha256File.Hash(zip) + "  " + s.Package.ZipName + "\r\n"; return s; }
@@ -100,6 +131,11 @@ public sealed class UpdateTests
         public int FindCalls, DownloadCalls; public bool Never; public Exception? Failure; public ReleasePackage? Package = Package(); public byte[] Zip = Array.Empty<byte>(); public string HashText = "";
         public Task<ReleasePackage?> FindLatestAsync(string currentVersion, string rid, CancellationToken cancellationToken = default) { FindCalls++; if (Never) return new Task<ReleasePackage?>(() => null); if (Failure != null) throw Failure; return Task.FromResult(Package); }
         public Task<byte[]> DownloadAsync(Uri uri, int maxBytes, CancellationToken cancellationToken = default) { DownloadCalls++; if (uri.AbsolutePath.EndsWith(".sha256")) return Task.FromResult(Encoding.UTF8.GetBytes(HashText)); return Task.FromResult(Zip); }
+    }
+    private sealed class DelayedSource(ReleasePackage package, TimeSpan delay) : IReleaseSource
+    {
+        public async Task<ReleasePackage?> FindLatestAsync(string currentVersion, string rid, CancellationToken cancellationToken = default) { await Task.Delay(delay, cancellationToken); return package; }
+        public Task<byte[]> DownloadAsync(Uri uri, int maxBytes, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
     private sealed class FaultFileOperations : IUpdateFileOperations
     {
