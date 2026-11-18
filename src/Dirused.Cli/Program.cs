@@ -32,8 +32,21 @@ public static class Program
             if (args.Length == 1) { output.WriteLine($"dirused {version} ({RuntimeInformation.RuntimeIdentifier})"); return 0; }
             error.WriteLine("/version must be used by itself."); return 1;
         }
+        if (args.Length == 0)
+        {
+            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath);
+            error.WriteLine(ArgParser.ShortUsageText);
+            checker?.WaitAfterReport(check, TimeSpan.FromSeconds(1));
+            return 1;
+        }
         var parsed = ArgParser.Parse(args);
-        if (parsed.Usage) { output.WriteLine(ArgParser.UsageText); return 0; }
+        if (parsed.Usage)
+        {
+            var (check, checker) = StartUpdateCheck(args, error, source, version, updateStatePath);
+            output.WriteLine(ArgParser.UsageText);
+            checker?.WaitAfterReport(check, TimeSpan.FromSeconds(1));
+            return 0;
+        }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
         StreamWriter? fileWriter = null;
@@ -59,13 +72,7 @@ public static class Program
             Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
                 ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
                 : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token);
-            Task? updateCheck = null;
-            UpdateCheck? updateChecker = null;
-            if (source != null && !args.Any(a => ArgParser.IsFlag(a, "noupdatecheck")) && GitHubReleaseSource.Parse(version) != null && Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK") != "1")
-            {
-                updateChecker = new UpdateCheck(source, error, updateStatePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dirused", "update-check.json"), version, RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64");
-                updateCheck = updateChecker.CheckAsync();
-            }
+            var (updateCheck, updateChecker) = StartUpdateCheck(args, error, source, version, updateStatePath);
             var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
                 .Select(x => options.Format == OutputFormat.Text
                     ? x.Result
@@ -109,6 +116,13 @@ public static class Program
             Console.CancelKeyPress -= cancelHandler;
             fileWriter?.Dispose();
         }
+    }
+
+    private static (Task? Check, UpdateCheck? Checker) StartUpdateCheck(string[] args, TextWriter error, IReleaseSource? source, string version, string? updateStatePath)
+    {
+        if (source == null || args.Any(a => ArgParser.IsFlag(a, "noupdatecheck")) || GitHubReleaseSource.Parse(version) == null || Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK") == "1") return (null, null);
+        var checker = new UpdateCheck(source, error, updateStatePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dirused", "update-check.json"), version, RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64");
+        return (checker.CheckAsync(), checker);
     }
 
     private static void CleanupUpdateFiles()

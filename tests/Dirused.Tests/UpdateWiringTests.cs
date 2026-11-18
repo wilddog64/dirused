@@ -51,6 +51,53 @@ public sealed class UpdateWiringTests
         finally { Directory.Delete(scratch, true); }
     }
 
+    [Fact]
+    public void W4_BareRunShowsUsageThenNotice()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-w4-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch); Assert.Equal(scratch, Path.GetFullPath(scratch));
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        try
+        {
+            var state = Path.Combine(scratch, "update-check.json"); var output = new StringWriter(); var error = new StringWriter(); var source = new FakeSource();
+            Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), output, error, source, "0.0.10", state));
+            var usageIndex = error.ToString().IndexOf("Run dirused /help for more.", StringComparison.Ordinal); var noticeIndex = error.ToString().IndexOf("dirused 0.0.11 is available", StringComparison.Ordinal);
+            Assert.True(usageIndex >= 0 && noticeIndex > usageIndex); Assert.Equal(1, source.FindCalls); Assert.Equal(0, source.DownloadCalls); Assert.StartsWith(scratch, Path.GetDirectoryName(state));
+            output.GetStringBuilder().Clear(); error.GetStringBuilder().Clear();
+            Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), output, error, source, "0.0.10", state));
+            Assert.Contains("Run dirused /help for more.", error.ToString()); Assert.DoesNotContain("is available", error.ToString()); Assert.Equal(1, source.FindCalls);
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
+    }
+
+    [Fact]
+    public void W5_HelpShowsNotice()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-w5-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch); Assert.Equal(scratch, Path.GetFullPath(scratch));
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        try
+        {
+            var output = new StringWriter(); var error = new StringWriter(); var source = new FakeSource();
+            Assert.Equal(0, Program.RunWithReleaseSource(new[] { "/help" }, output, error, source, "0.0.10", Path.Combine(scratch, "state.json")));
+            Assert.Contains("Usage:", output.ToString()); Assert.Contains("dirused 0.0.11 is available", error.ToString()); Assert.Equal(1, source.FindCalls); Assert.Equal(0, source.DownloadCalls);
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
+    }
+
+    [Fact]
+    public void W6_OtherUsageErrorsAndOptOutsDoNotCheck()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "dirused-w6-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch); Assert.Equal(scratch, Path.GetFullPath(scratch));
+        var prior = Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK"); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", null);
+        try
+        {
+            var bad = new FakeSource(); Assert.Equal(1, Program.RunWithReleaseSource(new[] { "/json", "/csv", scratch }, new StringWriter(), new StringWriter(), bad, "0.0.10", Path.Combine(scratch, "bad.json"))); Assert.Equal(0, bad.FindCalls);
+            var noFlag = new FakeSource(); var helpRc = Program.RunWithReleaseSource(new[] { "/help", "/noupdatecheck" }, new StringWriter(), new StringWriter(), noFlag, "0.0.10", Path.Combine(scratch, "help.json")); Assert.Equal(0, helpRc); Assert.Equal(0, noFlag.FindCalls);
+            var envSource = new FakeSource(); Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", "1"); var envError = new StringWriter();
+            Assert.Equal(1, Program.RunWithReleaseSource(Array.Empty<string>(), new StringWriter(), envError, envSource, "0.0.10", Path.Combine(scratch, "env.json"))); Assert.Equal(0, envSource.FindCalls); Assert.DoesNotContain("is available", envError.ToString());
+        }
+        finally { Environment.SetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK", prior); Directory.Delete(scratch, true); }
+    }
+
     private sealed class FakeSource : IReleaseSource
     {
         public int FindCalls, DownloadCalls;
