@@ -2,6 +2,7 @@ namespace Dirused.Common.Update;
 
 public sealed class UpdateCheck
 {
+    internal static readonly TimeSpan LookupInterval = TimeSpan.FromMinutes(15);
     private readonly IReleaseSource _source;
     private readonly TextWriter _error;
     private readonly string _statePath, _version, _rid;
@@ -11,12 +12,12 @@ public sealed class UpdateCheck
     public UpdateCheck(IReleaseSource source, TextWriter error, string statePath, string version, string rid, Func<DateTimeOffset>? clock = null)
     { _source = source; _error = error; _statePath = statePath; _version = version; _rid = rid; _clock = clock ?? (() => DateTimeOffset.UtcNow); }
 
-    public async Task CheckAsync()
+    public async Task CheckAsync(bool force = false)
     {
         if (GitHubReleaseSource.Parse(_version) == null || Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK") == "1") return;
         var now = _clock();
         var state = UpdateState.Read(_statePath, now);
-        if (state.AttemptedUtc is { } attempted && now - attempted <= TimeSpan.FromHours(24))
+        if (!force && state.AttemptedUtc is { } attempted && now - attempted <= LookupInterval)
         {
             _pendingNoticeState = state;
             return;
