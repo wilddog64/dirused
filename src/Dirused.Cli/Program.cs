@@ -2,13 +2,36 @@ using Dirused.Common;
 using Dirused.Common.Renderers;
 using Dirused.Core;
 using Dirused.Core.Targets;
+using Dirused.Common.Update;
+using System.Reflection;
+using System.Runtime.InteropServices;
 namespace Dirused.Cli;
 public static class Program
 {
-    public static int Main(string[] args) => Run(args, Console.Out, Console.Error);
-    public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
-    public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares)
+    public static int Main(string[] args)
     {
+        var version = (Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0-dev").Split('+')[0];
+        using var source = new GitHubReleaseSource(version);
+        return RunCore(args, Console.Out, Console.Error, null, source, version);
+    }
+    public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
+    public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares) => RunCore(args, output, error, nodeShares, null, "0.0.0-dev");
+    public static int RunWithReleaseSource(string[] args, TextWriter output, TextWriter error, IReleaseSource source, string version, string? updateStatePath = null) => RunCore(args, output, error, null, source, version, updateStatePath);
+    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null)
+    {
+        if (source != null) CleanupUpdateFiles();
+        if (args.Length == 1 && args[0].TrimStart('/', '-').Equals("version", StringComparison.OrdinalIgnoreCase)) { output.WriteLine($"dirused {version} ({System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier})"); return 0; }
+        if (args.Any(a => a.TrimStart('/', '-').Equals("update", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (args.Length != 1 || !args[0].TrimStart('/', '-').Equals("update", StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/update must be used by itself."); return 1; }
+            if (source == null) { error.WriteLine("/update is available in the packaged executable only."); return 1; }
+            return SelfUpdater.RunAsync(source, version, RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64", Environment.ProcessPath ?? "", output, error).GetAwaiter().GetResult();
+        }
+        if (args.Any(a => a.TrimStart('/', '-').Equals("version", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (args.Length == 1) { output.WriteLine($"dirused {version} ({RuntimeInformation.RuntimeIdentifier})"); return 0; }
+            error.WriteLine("/version must be used by itself."); return 1;
+        }
         var parsed = ArgParser.Parse(args);
         if (parsed.Usage) { output.WriteLine(ArgParser.UsageText); return 0; }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
@@ -36,6 +59,12 @@ public static class Program
             Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
                 ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
                 : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token);
+            Task? updateCheck = null;
+            if (source != null && !args.Any(a => a.TrimStart('/', '-').Equals("noupdatecheck", StringComparison.OrdinalIgnoreCase)) && GitHubReleaseSource.Parse(version) != null && Environment.GetEnvironmentVariable("DIRUSED_NO_UPDATE_CHECK") != "1")
+            {
+                var check = new UpdateCheck(source, error, updateStatePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dirused", "update-check.json"), version, RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "win-arm64" : "win-x64");
+                updateCheck = check.CheckAsync();
+            }
             var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
                 .Select(x => options.Format == OutputFormat.Text
                     ? x.Result
@@ -69,6 +98,7 @@ public static class Program
                 error.WriteLine($"HTML report: {reportPath}");
             }
             else if (fileWriter != null) error.WriteLine($"Report: {reportPath}");
+            UpdateCheck.WaitAfterReport(updateCheck, TimeSpan.FromSeconds(1));
             if (results.Any(r => r.Level == FullnessLevel.Crit)) return 4;
             return results.Any(r => !r.Complete) ? 3 : 0;
         }
@@ -78,6 +108,12 @@ public static class Program
             Console.CancelKeyPress -= cancelHandler;
             fileWriter?.Dispose();
         }
+    }
+
+    private static void CleanupUpdateFiles()
+    {
+        if (!Path.GetFileName(Environment.ProcessPath ?? "").Equals("dirused.exe", StringComparison.OrdinalIgnoreCase)) return;
+        SelfUpdater.Cleanup(Environment.ProcessPath!);
     }
 
     private static void WriteCsvErrors(TextWriter error, IEnumerable<ScanResult> results)

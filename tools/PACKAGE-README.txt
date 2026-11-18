@@ -47,3 +47,4 @@ Live checks
 If Windows blocks the exe ("Windows protected your PC" or "blocked by
 policy"): the build is unsigned. Right-click the zip > Properties > Unblock
 before extracting, or ask IT; do not disable security controls.
+Updates: dirused checks GitHub at most once a day and prints a notice to stderr. Disable checks with /noupdatecheck or set DIRUSED_NO_UPDATE_CHECK=1. Checks fail silently. Run dirused /update to explicitly download and verify the SHA-256 of a release before replacing dirused.exe; no automatic installation occurs. The checksum is published alongside the executable and detects corruption, but is not an independent publisher signature. HTTPS certificate validation is enabled. /update replaces only dirused.exe. If Windows blocks the new executable, restore dirused.exe.old by renaming it to dirused.exe.

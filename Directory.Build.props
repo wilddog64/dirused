@@ -1,1 +1,1 @@
-<Project><PropertyGroup><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors><LangVersion>latest</LangVersion><EnableWindowsTargeting>true</EnableWindowsTargeting></PropertyGroup></Project>
+<Project><PropertyGroup><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors><LangVersion>latest</LangVersion><EnableWindowsTargeting>true</EnableWindowsTargeting><Version>0.0.0-dev</Version></PropertyGroup></Project>

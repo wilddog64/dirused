@@ -6,6 +6,10 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 
 ## [Unreleased]
 
+### Added
+- Daily new-release notices on stderr and an explicit `/update` command that verifies the package SHA-256 before replacing `dirused.exe`.
+- `/version` and `/noupdatecheck`.
+
 ### Changed
 - `/html` report: OK volumes show a green bar and OK label; small usage stays visible.
 

@@ -3,6 +3,7 @@ param(
     [string]$Targets = ''
 )
 $ErrorActionPreference = 'Continue'
+$env:DIRUSED_NO_UPDATE_CHECK = '1'
 $exe = $Exe
 if (-not $exe) {
     $nextToScript = Join-Path $PSScriptRoot 'dirused.exe'

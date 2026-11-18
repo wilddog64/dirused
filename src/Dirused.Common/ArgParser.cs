@@ -42,6 +42,9 @@ public static class ArgParser
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
         "  /parallel <n>       Max concurrent scans, 1-64 (default: 4)\n" +
         "  /help               Show this help\n" +
+        "  /version            Show version and architecture\n" +
+        "  /update             Download and install the latest release\n" +
+        "  /noupdatecheck      Do not check for updates during this run\n" +
         "\n" +
         "Exit codes:\n" +
         "  0  All targets completed\n" +
@@ -77,6 +80,7 @@ public static class ArgParser
                 switch (name)
                 {
                     case "all": targets.Add("/all"); break;
+                    case "noupdatecheck": break;
                     case "top": if (++i >= args.Length || !int.TryParse(args[i], out top) || top < 1) return new(Error: "/top requires a positive integer"); break;
                     case "json": json = true; break;
                     case "csv": csv = true; break;
