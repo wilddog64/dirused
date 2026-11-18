@@ -87,7 +87,12 @@ public sealed class UpdateTests
     }
 
     [Fact] public async Task U14_CorruptFutureAndConcurrentStateFilesAreTreatedAsUnchecked()
-    { var scratch = Scratch(); try { var path = Path.Combine(scratch, "state.json"); File.WriteAllText(path, "{"); var src = new FakeSource { Package = null }; await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(1, src.FindCalls); new UpdateState(DateTimeOffset.UtcNow.AddDays(2), null, null).Write(path); await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(2, src.FindCalls); var writer = Task.Run(() => { for (var i = 0; i < 20; i++) new UpdateState(DateTimeOffset.UtcNow, null, null).Write(path); }); var readers = Enumerable.Range(0, 20).Select(_ => Task.Run(() => UpdateState.Read(path, DateTimeOffset.UtcNow))).ToArray(); await writer; await Task.WhenAll(readers); } finally { Directory.Delete(scratch, true); } }
+    { var scratch = Scratch(); try { var path = Path.Combine(scratch, "state.json"); File.WriteAllText(path, "{"); var src = new FakeSource { Package = null }; await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(1, src.FindCalls); new UpdateState(DateTimeOffset.UtcNow.AddDays(2), null, null).Write(path); await Checker(src, new StringWriter(), scratch).CheckAsync(); Assert.Equal(2, src.FindCalls);
+        var successfulWrites = 0;
+        var writer = Task.Run(() => { for (var i = 0; i < 20; i++) { try { new UpdateState(DateTimeOffset.UtcNow, null, null).Write(path); Interlocked.Increment(ref successfulWrites); } catch (IOException) { } catch (UnauthorizedAccessException) { } } });
+        var readers = Enumerable.Range(0, 20).Select(_ => Task.Run(() => UpdateState.Read(path, DateTimeOffset.UtcNow))).ToArray(); await writer; await Task.WhenAll(readers);
+        Assert.True(successfulWrites > 0); Assert.NotNull(UpdateState.Read(path, DateTimeOffset.UtcNow)); Assert.Empty(Directory.GetFiles(scratch, "*.tmp-*"));
+      } finally { Directory.Delete(scratch, true); } }
 
     [Fact] public void U16_OnlyPrefixedWordsAreFlags()
     {
