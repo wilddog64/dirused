@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Dirused.Cli;
+using Dirused.Common;
 using Dirused.Core;
 using Xunit;
 
@@ -23,6 +24,43 @@ public sealed class ScannerTests : IDisposable
     {
         using var process = Process.Start(new ProcessStartInfo(command, arguments) { UseShellExecute = false, CreateNoWindow = true })!;
         process.WaitForExit(); Assert.Equal(0, process.ExitCode);
+    }
+
+    [Fact]
+    public void W1_LargestFindsDeepFilesBeyondDeep()
+    {
+        string tree = PathIn("largest-tree");
+        Directory.CreateDirectory(Path.Combine(tree, "a", "b", "c"));
+        File.WriteAllBytes(Path.Combine(tree, "a", "b", "c", "heap.hprof"), new byte[3 * 1024 * 1024]);
+        File.WriteAllBytes(Path.Combine(tree, "a", "x.log"), new byte[1024 * 1024]);
+        File.WriteAllBytes(Path.Combine(tree, "a", "big.iso"), new byte[5 * 1024 * 1024]);
+        var collector = new LargestCollector(20, Largest.DefaultPatterns);
+        var result = new Scanner().Scan(tree, deep: 1, largest: collector);
+        Assert.Equal(new[] { Path.Combine(tree, "a", "b", "c", "heap.hprof"), Path.Combine(tree, "a", "x.log") }, result.Largest!.Files.Select(f => f.Path));
+        Assert.DoesNotContain(result.Largest.Files, f => f.Path.EndsWith("big.iso", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(result.Directories);
+    }
+
+    [Fact]
+    public void W2_LargestLastWriteDateAndInvalidFiletimeGuard()
+    {
+        string file = PathIn("heap.hprof"); File.WriteAllBytes(file, new byte[1024]);
+        DateTime expected = new(2025, 3, 11, 0, 0, 0, DateTimeKind.Utc); File.SetLastWriteTimeUtc(file, expected);
+        var result = new Scanner().Scan(root, largest: new LargestCollector(20, Largest.DefaultPatterns));
+        Assert.Equal(expected, result.Largest!.Files.Single().LastWriteUtc);
+        Assert.Null(DirectoryReader.ToUtcOrNull(0)); Assert.Null(DirectoryReader.ToUtcOrNull(-1)); Assert.Null(DirectoryReader.ToUtcOrNull(long.MaxValue));
+        Assert.Equal(expected, DirectoryReader.ToUtcOrNull(expected.ToFileTimeUtc()));
+    }
+
+    [Fact]
+    public void W3_ScanWithoutLargestLeavesEntriesAndResultUnchanged()
+    {
+        string tree = PathIn("largest-control"); Directory.CreateDirectory(Path.Combine(tree, "a"));
+        File.WriteAllBytes(Path.Combine(tree, "a", "one.log"), new byte[1024]);
+        var before = new Scanner().Scan(tree, deep: 2);
+        var after = new Scanner().Scan(tree, deep: 2, largest: new LargestCollector(20, Largest.DefaultPatterns));
+        Assert.Null(before.Largest); Assert.NotNull(after.Largest);
+        Assert.Equal(before.Directories, after.Directories); Assert.Equal(before.Files, after.Files);
     }
     private (int code, string output) Run(params string[] args)
     {

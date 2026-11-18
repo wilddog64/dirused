@@ -93,6 +93,18 @@ public sealed class TopFoldersTests
     }
 
     [Fact]
+    public void Test_AttachCopiesLargestOnlyForWarnAndCrit()
+    {
+        var targets = new[] { Target("ok"), Target("warn"), new Target("crit", TargetKind.LocalPath, "D:\\", "crit") };
+        var results = new[] { Result("ok") with { Level = FullnessLevel.Ok }, Result("warn", 90) with { Level = FullnessLevel.Warn }, Result("crit", 95) with { Volume = new Volume("D:\\", 5, 5, 10, 95), Level = FullnessLevel.Crit } };
+        var largest = new LargestFiles(new[] { "*.log" }, 1, 10, new() { new("x.log", 10, null) }, true);
+        var attached = TopFolders.Attach(targets, results, (t, _) => FolderScan(t.Display) with { Largest = largest }, new(), CancellationToken.None);
+        Assert.Null(attached[0].Largest);
+        Assert.Same(largest, attached[1].Largest);
+        Assert.Same(largest, attached[2].Largest);
+    }
+
+    [Fact]
     public void Test_AttachKeepsTop3FoldersByLogicalSize()
     {
         var target = Target("crit");

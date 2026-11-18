@@ -7,7 +7,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Dirused.Core;
 
-public readonly record struct DirEntry(string Name, FileAttributes Attributes, long EndOfFile, ulong FileId);
+public readonly record struct DirEntry(string Name, FileAttributes Attributes, long EndOfFile, ulong FileId, DateTime? LastWriteUtc = null);
 
 public static class DirectoryReader
 {
@@ -21,6 +21,8 @@ public static class DirectoryReader
         path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path :
         path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] :
         @"\\?\" + path;
+
+    internal static DateTime? ToUtcOrNull(long fileTime) => fileTime <= 0 || fileTime > DateTime.MaxValue.ToFileTimeUtc() ? null : DateTime.FromFileTimeUtc(fileTime);
 
     public static IReadOnlyList<DirEntry> Read(string path)
     {
@@ -63,6 +65,7 @@ public static class DirectoryReader
                 {
                     uint nextEntryOffset = (uint)Marshal.ReadInt32(current, 0);
                     long endOfFile = Marshal.ReadInt64(current, 40);
+                    long rawLastWrite = Marshal.ReadInt64(current, 24);
                     FileAttributes attributes = (FileAttributes)Marshal.ReadInt32(current, 56);
                     uint fileNameLength = (uint)Marshal.ReadInt32(current, 60);
                     ulong fileId = (ulong)Marshal.ReadInt64(current, 96);
@@ -71,7 +74,7 @@ public static class DirectoryReader
 
                     if (fileName != "." && fileName != "..")
                     {
-                        entries.Add(new DirEntry(fileName, attributes, endOfFile, fileId));
+                        entries.Add(new DirEntry(fileName, attributes, endOfFile, fileId, ToUtcOrNull(rawLastWrite)));
                     }
 
                     if (nextEntryOffset == 0)

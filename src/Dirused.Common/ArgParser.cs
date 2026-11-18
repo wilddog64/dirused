@@ -46,6 +46,9 @@ public static class ArgParser
         "  /crit [n]           Critical fullness threshold (default: 90)\n" +
         "  /deep [n]           List n directory levels, 1-32 (/deep alone: 2)\n" +
         "  /exact              On-disk sizes and hard-link dedup (slower)\n" +
+        "  /largest [patterns] Largest matching files under each target\n" +
+        "                      (README defaults; + adds; plain list replaces; * all)\n" +
+        "  /largestcount <n>   How many /largest files per target, 1-1000 (default: 20)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
         "  /parallel <n>       Max concurrent scans, 1-64 (default: 4)\n" +
         "  /help               Show this help\n" +
@@ -78,6 +81,7 @@ public static class ArgParser
         string? output = null;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
         int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
+        IReadOnlyList<string>? largest = null; bool largestGiven = false; int largestCount = 20;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -139,6 +143,21 @@ public static class ArgParser
                         }
                         break;
                     case "exact": exact = true; break;
+                    case "largest":
+                        largestGiven = true;
+                        string? patternArg = null;
+                        if (i + 1 < args.Length)
+                        {
+                            string next = args[i + 1];
+                            bool isSwitch = (next.StartsWith('/') && !next.StartsWith("//", StringComparison.Ordinal)) || next.StartsWith('-');
+                            if (!isSwitch && (next.IndexOfAny(new[] { '*', '?', ';', ',' }) >= 0 || next.StartsWith('+'))) { patternArg = next; i++; }
+                        }
+                        if (!Largest.ParsePatterns(patternArg, out largest, out var patternError)) return new(Error: patternError);
+                        break;
+                    case "largestcount":
+                        if (++i >= args.Length || !int.TryParse(args[i], out largestCount) || largestCount < 1 || largestCount > 1000)
+                            return new(Error: "/largestcount requires an integer from 1 to 1000");
+                        break;
                     case "timeout":
                         if (++i >= args.Length || !TryParseTimeout(args[i], out var t))
                             return new(Error: "/timeout requires a positive duration (e.g. 30, 30s, 5m, 1h)");
@@ -149,7 +168,7 @@ public static class ArgParser
                         parallel = p; break;
                     default: return new(Error: $"Unknown switch: {arg}");
                 }
-                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output));
+                var unavailable = RejectUnavailable(new Options(targets, top, OutputFormat.Text, file, summary && !deepGiven && !exact, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output, largest, largestCount));
                 if (unavailable != null) return new(Error: unavailable);
             }
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
@@ -165,9 +184,10 @@ public static class ArgParser
             }
         }
         if (warn >= crit) return new(Error: "/warn must be below /crit");
+        if (!largestGiven && args.Any(a => IsFlag(a, "largestcount"))) return new(Error: "/largestcount requires /largest");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
         bool effectiveSummary = summary && !deepGiven && !exact;
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null)));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount));
     }
 
     public static string? RejectUnavailable(Options options) => null;
