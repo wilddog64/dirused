@@ -26,7 +26,7 @@ public static class TopFolders
             string? note = result.Complete ? null : result.Errors.FirstOrDefault() is { } error ? $"{error.Path}: {error.Reason}" : $"{result.Target}: Unknown error";
             var directories = result.Directories.OrderByDescending(e => e.LogicalBytes)
                 .ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(Count).ToList();
-            attached[indices[j]] = attached[indices[j]] with { Directories = directories, TopFoldersNote = note };
+            attached[indices[j]] = attached[indices[j]] with { Directories = directories, TopFoldersNote = note, Largest = result.Largest };
         }
         return attached;
     }

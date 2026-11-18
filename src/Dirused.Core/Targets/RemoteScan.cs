@@ -1,10 +1,11 @@
 using System.ComponentModel;
 using Dirused.Core.Volumes;
+using Dirused.Common;
 namespace Dirused.Core.Targets;
 public static class RemoteScan
 {
     public static ScanResult Scan(ResolvedTarget resolved, CancellationToken ct = default) => Scan(resolved, 1, false, ct);
-    public static ScanResult Scan(ResolvedTarget resolved, int deep, bool exact, CancellationToken ct = default) => Scan(resolved, path => new Scanner().Scan(path, deep, exact, ct));
+    public static ScanResult Scan(ResolvedTarget resolved, int deep, bool exact, CancellationToken ct = default, LargestCollector? largest = null) => Scan(resolved, path => new Scanner().Scan(path, deep, exact, ct, largest));
     public static ScanResult Scan(ResolvedTarget resolved, Func<string, ScanResult> scan)
     {
         var target = resolved.Target;

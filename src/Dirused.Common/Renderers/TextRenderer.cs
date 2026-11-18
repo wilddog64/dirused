@@ -63,6 +63,8 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
                 }
             }
 
+            WriteLargest(output, r.Largest, Format.Short);
+
             foreach (string path in r.SystemOnly) output.WriteLine($"{path}: system only (not counted)");
 
             if (!r.Complete)
@@ -71,5 +73,14 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
                 foreach (var e in r.Errors.Take(10)) output.WriteLine($"{e.Path}: {e.Reason}");
             }
         }
+    }
+
+    internal static void WriteLargest(TextWriter output, LargestFiles? largest, Func<long, string> size)
+    {
+        if (largest == null) return;
+        if (largest.Matches == 0) { output.WriteLine("Largest candidate files: none matched" + (largest.Complete ? "" : " (scan incomplete)")); return; }
+        output.WriteLine($"Largest candidate files ({largest.Files.Count} of {largest.Matches.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} matches, {size(largest.MatchedBytes)}):" + (largest.Complete ? "" : " (scan incomplete)"));
+        foreach (var file in largest.Files)
+            output.WriteLine($"  {size(file.LogicalBytes)}  {(file.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-")}  {file.Path}");
     }
 }

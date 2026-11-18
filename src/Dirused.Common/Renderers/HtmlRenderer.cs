@@ -73,6 +73,18 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
                     output.WriteLine($"<tr><td class=\"num\">{E(Format.Size(entry.LogicalBytes))}</td><td>{E(entry.Path)}</td></tr>");
                 output.WriteLine("</tbody></table></div></section>");
             }
+        var largestGroups = (summary ? volumes : results).Where(r => r.Largest != null).ToList();
+        if (largestGroups.Count > 0)
+        {
+            output.WriteLine("<h2>Largest candidate files</h2><div class=\"scroll\"><table class=\"largest\"><thead><tr><th>Host</th><th>Size</th><th>Modified</th><th>Path</th></tr></thead><tbody>");
+            foreach (var r in largestGroups)
+            {
+                var l = r.Largest!;
+                output.WriteLine($"<tr class=\"group\"><th colspan=\"4\">{E(Host(r))} {E(r.Target)}: {l.Files.Count} of {l.Matches.ToString("N0", CultureInfo.InvariantCulture)} matches, {E(Format.Size(l.MatchedBytes))}{(l.Complete ? "" : " (scan incomplete)")}</th></tr>");
+                foreach (var f in l.Files) output.WriteLine($"<tr><td>{E(Host(r))}</td><td class=\"num\">{E(Format.Size(f.LogicalBytes))}</td><td>{E(f.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-")}</td><td>{E(f.Path)}</td></tr>");
+            }
+            output.WriteLine("</tbody></table></div>");
+        }
         output.WriteLine("</body></html>");
     }
 

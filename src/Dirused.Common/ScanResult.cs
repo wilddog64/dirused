@@ -1,5 +1,7 @@
 namespace Dirused.Core;
 
+using Dirused.Common;
+
 public record Entry(string Path, long LogicalBytes, long OnDiskBytes);
 public record ScanError(string Path, string Reason);
 public record Volume(string Drive, long UsedBytes, long FreeBytes, long TotalBytes, double PercentUsed)
@@ -18,4 +20,6 @@ public record ScanResult(string Target, Volume Volume, List<Entry> Directories, 
     public Dirused.Common.Renderers.FullnessLevel? Level { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string? TopFoldersNote { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public LargestFiles? Largest { get; init; }
 }

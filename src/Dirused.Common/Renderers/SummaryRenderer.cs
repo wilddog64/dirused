@@ -15,6 +15,7 @@ public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = f
             int width = directories.Select(e => Format.Size(e.LogicalBytes).Length).DefaultIfEmpty(0).Max();
             foreach (var directory in directories) output.WriteLine($"    {Format.Size(directory.LogicalBytes).PadLeft(width)}  {directory.Path}");
             if (r.TopFoldersNote != null) output.WriteLine($"    top folders incomplete: {r.TopFoldersNote}");
+            TextRenderer.WriteLargest(output, r.Largest, Format.Size);
         }
         foreach (var f in failed)
         {

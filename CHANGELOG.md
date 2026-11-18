@@ -7,6 +7,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 ## [Unreleased]
 
 ### Added
+- `/largest` lists the largest log, dump, backup and temp files under each target (patterns overridable); `/largestcount` sets how many.
 - Daily new-release notices on stderr and an explicit `/update` command that verifies the package SHA-256 before replacing `dirused.exe`.
 - `/version` and `/noupdatecheck`.
 

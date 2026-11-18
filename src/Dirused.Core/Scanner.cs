@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Dirused.Common;
 
 namespace Dirused.Core;
 
@@ -29,7 +30,7 @@ public sealed class Scanner
 
     public ScanResult Scan(string target, CancellationToken ct) => Scan(target, 1, false, ct);
 
-    public ScanResult Scan(string target, int deep = 1, bool exact = false, CancellationToken ct = default)
+    public ScanResult Scan(string target, int deep = 1, bool exact = false, CancellationToken ct = default, LargestCollector? largest = null)
     {
         seen.Clear(); directories.Clear(); files.Clear(); errors.Clear(); systemOnly.Clear();
         stopReported = false;
@@ -41,7 +42,7 @@ public sealed class Scanner
         var volume = Volumes.VolumeProbe.Probe(root);
         clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
-        Walk(full, 0, deep, exact, ct);
+        Walk(full, 0, deep, exact, ct, largest);
         return new ScanResult(
             full,
             volume,
@@ -49,10 +50,10 @@ public sealed class Scanner
             files.OrderByDescending(x => x.OnDiskBytes).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToList(),
             errors,
             errors.Count == 0 && !ct.IsCancellationRequested,
-            exact) { SystemOnly = systemOnly.ToList() };
+            exact) { SystemOnly = systemOnly.ToList(), Largest = largest?.Snapshot(errors.Count == 0 && !ct.IsCancellationRequested) };
     }
 
-    private (long logical, long disk) Walk(string path, int depth, int maxDepth, bool exact, CancellationToken ct)
+    private (long logical, long disk) Walk(string path, int depth, int maxDepth, bool exact, CancellationToken ct, LargestCollector? largest)
     {
         if (ct.IsCancellationRequested) return (0, 0);
         long logical = 0, disk = 0;
@@ -89,7 +90,7 @@ public sealed class Scanner
                         if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                         if ((attributes & FileAttributes.Directory) != 0)
                         {
-                            var child = Walk(display, depth + 1, maxDepth, exact, ct);
+                            var child = Walk(display, depth + 1, maxDepth, exact, ct, largest);
                             logical += child.logical;
                             disk += child.disk;
                             if (depth + 1 <= maxDepth && !systemOnly.Contains(display, StringComparer.OrdinalIgnoreCase))
@@ -108,6 +109,8 @@ public sealed class Scanner
                             }
                             logical += countedLength;
                             disk += allocated;
+                            bool placeholder = ((uint)attributes & (0x00400000u | 0x00040000u | 0x1000u)) != 0;
+                            if (countedLength > 0 && !placeholder) largest?.Offer(display, entry.Name, countedLength, FileTimeSafe(((FileInfo)entry).LastWriteTimeUtc));
                         }
                     }
                     catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(display, ex.Message)); }
@@ -125,7 +128,7 @@ public sealed class Scanner
                         if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                         if ((attributes & FileAttributes.Directory) != 0)
                         {
-                            var child = Walk(childPath, depth + 1, maxDepth, exact, ct);
+                            var child = Walk(childPath, depth + 1, maxDepth, exact, ct, largest);
                             logical += child.logical;
                             disk += child.disk;
                             if (depth + 1 <= maxDepth && !systemOnly.Contains(childPath, StringComparer.OrdinalIgnoreCase))
@@ -158,6 +161,7 @@ public sealed class Scanner
                             }
                             logical += countedLength;
                             disk += allocated;
+                            if (countedLength > 0 && !placeholder) largest?.Offer(childPath, entry.Name, countedLength, entry.LastWriteUtc);
                         }
                     }
                     catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(childPath, ex.Message)); }
@@ -202,4 +206,5 @@ public sealed class Scanner
         long size = checked((long)(((ulong)high << 32) | low));
         return RoundToCluster(size);
     }
+    private static DateTime? FileTimeSafe(DateTime value) { try { return DirectoryReader.ToUtcOrNull(value.ToFileTimeUtc()); } catch (ArgumentOutOfRangeException) { return null; } }
 }

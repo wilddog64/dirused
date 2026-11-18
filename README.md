@@ -59,6 +59,24 @@ C:\dump.bin      512M
 - **/exact:** By default, scan speeds over the network by reading file length and locally rounding to the volume cluster size without per-file file opens or compression checks. Both the default scan and `/exact` count a hard-linked file once. With `/exact`, dirused adds true on-disk sizes (`GetCompressedFileSize`).
 - **On disk vs. logical:** "Logical" size is the apparent file length; "on disk" is the space allocated in whole volume clusters (e.g. 4 KB on NTFS, so a 27.2 KB file occupies 28 KB), smaller only for compressed or sparse files. In `/exact` mode, any row whose on-disk size differs from its logical size by more than one cluster appends `(<size> on disk)`.
 
+### Largest cleanup candidates
+
+`/largest` lists matching files anywhere under each target. It defaults to 20 files; `/largestcount N` accepts 1–1000.
+The built in, case insensitive file name patterns are:
+
+| Group | Patterns |
+|---|---|
+| Logs | `*.log`, `*.log.*`, `*.out` |
+| Heap and crash dumps | `*.hprof`, `*.phd`, `javacore*.txt`, `*.dmp`, `*.mdmp`, `*.trc`, `*.etl` |
+| Backups | `*.bak`, `*.bkp`, `*.old`, `*.orig`, `*.backup` |
+| Temp | `*.tmp`, `*.temp`, `~$*`, `*.~*`, `*.swp`, `*.$$$` |
+| Partial transfers | `*.part`, `*.partial`, `*.crdownload`, `*.filepart` |
+
+Pass a plain list to replace the defaults (`/largest "*.hprof;*.dmp"`), a `+` list to add patterns
+(`/largest "+*.trc2;+*.out2"`), or `*` to include every file. A single exact name needs a trailing semicolon,
+for example `/largest "catalina.out;"`. In Windows, write a relative folder whose name starts with `+` as `.\+name` so `/largest` does not consume it as a pattern.
+dirused only lists candidates; it never deletes or opens files.
+
 ### Switches
 
 ```

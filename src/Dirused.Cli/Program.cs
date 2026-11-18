@@ -71,7 +71,7 @@ public static class Program
             foreach (var item in resolved) byTarget.TryAdd(item.Target, item);
             Func<Dirused.Common.Targets.Target, CancellationToken, ScanResult> scan = options.Summary
                 ? (target, _) => RemoteScan.Scan(byTarget[target], ProbeSummary)
-                : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token);
+                : (target, token) => RemoteScan.Scan(byTarget[target], options.Deep, options.Exact, token, options.Largest == null ? null : new LargestCollector(options.LargestCount, options.Largest));
             var (updateCheck, updateChecker) = StartUpdateCheck(args, error, source, version, updateStatePath);
             var results = ScanRunner.Run(targets, scan, new RunOptions(options.Parallel, options.Timeout), cts.Token)
                 .Select(x => options.Format == OutputFormat.Text
@@ -80,7 +80,7 @@ public static class Program
                 .Select(x => x with { Level = Fullness.For(x, options.Warn, options.Crit) })
                 .ToList();
             if (options.Summary && (options.Format != OutputFormat.Csv || options.Html))
-                results = TopFolders.Attach(targets, results, (t, token) => RemoteScan.Scan(byTarget[t], 1, false, token), new RunOptions(options.Parallel, options.Timeout ?? TopFolders.DefaultTimeout), cts.Token).ToList();
+                results = TopFolders.Attach(targets, results, (t, token) => RemoteScan.Scan(byTarget[t], 1, false, token, options.Largest == null ? null : new LargestCollector(options.LargestCount, options.Largest)), new RunOptions(options.Parallel, options.Timeout ?? TopFolders.DefaultTimeout), cts.Token).ToList();
             IRenderer renderer = options.Format switch
             {
                 OutputFormat.Json => new JsonRenderer(options.Summary),
