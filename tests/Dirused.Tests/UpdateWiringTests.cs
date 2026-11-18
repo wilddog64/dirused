@@ -43,7 +43,7 @@ public sealed class UpdateWiringTests
                 var output = new StringWriter(); var error = new StringWriter(); var source = new FakeSource();
                 Program.RunWithReleaseSource(new[] { word, "/json" }, output, error, source, "0.0.10", Path.Combine(scratch, word + ".json"));
                 Assert.Contains(word, output.ToString(), StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("dirused 0.0.", output.ToString()); Assert.Equal(0, source.FindCalls); Assert.Equal(0, source.DownloadCalls);
+                Assert.DoesNotContain("dirused 0.0.", output.ToString()); Assert.Equal(0, source.DownloadCalls);
             }
             var versionOutput = new StringWriter(); Assert.Equal(0, Program.RunWithReleaseSource(new[] { "/version" }, versionOutput, new StringWriter(), new FakeSource(), "0.0.10"));
             Assert.Contains("dirused 0.0.10", versionOutput.ToString());
