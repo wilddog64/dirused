@@ -89,6 +89,51 @@ public sealed class HtmlRendererTests
         Assert.Contains("<tr class=\"crit\"><td>srv3</td>", lowered.ToString());
     }
 
+    [Fact]
+    public void H17_OkVolumesAreGreen()
+    {
+        var results = new[] { R(@"\\srv1\c$", 95), R(@"\\srv2\c$", 87), R(@"\\srv3\c$", 10) };
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, results);
+        var html = writer.ToString();
+        var volumes = html.Substring(html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal));
+        Assert.Contains("<tr class=\"ok\"><td>srv3</td>", volumes);
+        Assert.Contains("<span class=\"lvl\">OK</span>", volumes);
+        Assert.Contains("<tr class=\"crit\"><td>srv1</td>", volumes);
+        Assert.Contains("<tr class=\"warn\"><td>srv2</td>", volumes);
+        Assert.Contains(".ok .bar>span{background:", html);
+        Assert.Contains(".ok .lvl{", html);
+        Assert.DoesNotContain(".ok{", html);
+
+        var nodes = html.Substring(html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal), html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal) - html.IndexOf("<table class=\"nodes\"", StringComparison.Ordinal));
+        Assert.Contains("<tr><td>srv3</td>", nodes);
+    }
+
+    [Fact]
+    public void H18_IncompleteVolumeHasNoLevel()
+    {
+        var incomplete = R(@"\\srv1\c$", 10) with { Complete = false };
+        var zeroTotal = R(@"\\srv2\c$", 10) with { Volume = new Volume(@"C:\", 0, 0, 0, 0) };
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, new[] { incomplete, zeroTotal });
+        var html = writer.ToString();
+        Assert.DoesNotContain("class=\"ok\"", html);
+        var volumes = html.Substring(html.IndexOf("<table class=\"volumes\"", StringComparison.Ordinal));
+        var zeroTotalRow = volumes.Split("<tr>", StringSplitOptions.None).Single(row => row.Contains("<td>srv2</td>", StringComparison.Ordinal));
+        Assert.Contains("</span></td><td></td><td>", zeroTotalRow);
+        Assert.Contains("<td>srv1</td>", html);
+        Assert.Contains("class=\"failed\"", html);
+    }
+
+    [Fact]
+    public void H19_SmallFillHasMinimumWidth()
+    {
+        using var writer = new StringWriter();
+        new HtmlRenderer(true, 85, 90, 50).Render(writer, new[] { R(@"\\srv1\c$", 1) });
+        Assert.Contains(".bar>span{", writer.ToString());
+        Assert.Contains(".bar>span{display:block;height:100%;min-width:3px;", writer.ToString());
+    }
+
     private static ScanResult R(string target, double percent) => new(target,
         new Volume(target.EndsWith("d$", StringComparison.OrdinalIgnoreCase) ? @"D:\" : @"C:\", (long)(percent * 100), (long)((100 - percent) * 100), 10000, percent),
         new() { new Entry("folder", 10, 10) }, new(), new(), true);
