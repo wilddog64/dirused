@@ -20,6 +20,11 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
 
         foreach (var r in results)
         {
+            if (r.Largest?.Files.Any(f => f.FromList) == true)
+            {
+                WriteLargest(output, r.Largest, Format.Short);
+                continue;
+            }
             var v = r.Volume;
             var level = Fullness.For(r, warn, crit);
             Fullness.WriteLine(output, $"{v.Drive}  used {Format.Short(v.UsedBytes)}, free {Format.Short(v.FreeBytes)}, total {Format.Short(v.TotalBytes)}, {v.PercentUsed:F1}% used{Fullness.Tag(level)}", level, color);

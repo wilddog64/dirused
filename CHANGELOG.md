@@ -7,12 +7,14 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 ## [Unreleased]
 
 ### Added
+- `/savelist <file>` writes the reviewed `/largest /purge` candidates with NTFS volume serial, file ID, size and exact modified time; `/fromlist <file> /purge` rechecks that identity before deletion. Invalid and duplicate lines are reported and produce exit code 3.
 - `/purge [days]` deletes the files `/largest <patterns>` lists that are older than days (default 1) and at least `/minsize` (default 1GB); a dry run unless `/confirm`; each deletion is logged to `C:\temp\dirused-purge.log`.
 - `/largest` lists the largest log, dump, backup and temp files under each target (patterns overridable); `/largestcount` sets how many.
 - Daily new-release notices on stderr and an explicit `/update` command that verifies the package SHA-256 before replacing `dirused.exe`.
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- `/fromlist` dry runs now apply the same regular-file, hard-link, containment and read-only checks as `/confirm`; invalid list paths and purge-log open failures exit cleanly, and list HTML shows only purge results.
 - `/purge` labels files smaller than `/minsize` as `smaller than` before any age check.
 - `/purge` text and HTML output omit files smaller than `/minsize` and note how many were hidden; JSON and CSV still list every file.
 - `/purge` dry runs no longer require `/largest` patterns; explicit patterns, non-match-all, and full pattern lists are required only with `/confirm`.

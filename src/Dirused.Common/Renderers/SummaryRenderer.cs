@@ -37,6 +37,7 @@ public sealed class SummaryRenderer(int warn = 85, int crit = 90, bool color = f
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in results)
         {
+            if (r.Largest?.Files.Any(f => f.FromList) == true) continue;
             if (!r.Complete)
             {
                 failed.Add(r);
