@@ -86,7 +86,7 @@ public class ProgramPurgeTests
             using (var output = new StringWriter()) using (var error = new StringWriter())
             {
                 Program.RunWithPurge(new[] { dir, "/largest", "*.log", "/purge", "/confirm" }, output, error, log);
-                Assert.True(File.Exists(file)); Assert.Contains("[skipped: smaller than 1.0 GB]", output.ToString());
+                Assert.True(File.Exists(file)); Assert.Contains("1 smaller than 1.0 GB not shown", output.ToString()); Assert.Contains("no files of at least 1.0 GB", output.ToString());
                 Assert.Contains("Purge: deleted 0 file(s)", error.ToString());
             }
             using (var output = new StringWriter()) using (var error = new StringWriter())

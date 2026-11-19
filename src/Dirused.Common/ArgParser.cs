@@ -58,7 +58,9 @@ public static class ArgParser
         "                      Without /confirm this is a dry run: nothing is\n" +
         "                      deleted, the report shows what would be.\n" +
         "  /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,\n" +
-        "                      999MB, 2GB (default: 1GB)\n" +
+        "                      999MB, 2GB (default: 1GB). Text and HTML output\n" +
+        "                      do not list files smaller than /minsize; lower\n" +
+        "                      /minsize to see them; JSON and CSV list every file.\n" +
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
         "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
         "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +

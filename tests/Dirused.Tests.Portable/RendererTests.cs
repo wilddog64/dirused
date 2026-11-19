@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dirused.Common;
 using Dirused.Common.Renderers;
 using Dirused.Core;
 using Xunit;
@@ -223,5 +224,129 @@ public class RendererTests
         var remoteLines = textRemote.ToString().TrimEnd().Split(Environment.NewLine);
         Assert.Equal(2, remoteLines.Length);
         Assert.Equal("1 volume(s): 0 at or above 90%, 0 at or above 85%", remoteLines[^1]);
+    }
+
+    [Fact]
+    public void PurgeHidesFilesBelowMinSizeInTextAndHtml()
+    {
+        const long gb = 1024L * 1024 * 1024;
+        const long mb = 1024L * 1024;
+        const long kb = 1024L;
+        var date = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var f1 = new LargestFile(@"C:\t\del.log", 2L * gb, date) { PurgeStatus = "would delete" };
+        var f2 = new LargestFile(@"C:\t\recent.log", 3L * gb, date) { PurgeStatus = "skipped: modified within 1 day(s)" };
+        var f3 = new LargestFile(@"C:\t\small1.log", 5L * mb, date) { PurgeStatus = "skipped: smaller than 1.0 GB" };
+        var f4 = new LargestFile(@"C:\t\small2.log", 1L * kb, date) { PurgeStatus = "skipped: smaller than 1.0 GB" };
+        var files = new List<LargestFile> { f1, f2, f3, f4 };
+        long totalBytes = files.Sum(f => f.LogicalBytes);
+
+        var rMixed = new ScanResult(@"C:\t", new Volume(@"C:\", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            Largest = new LargestFiles(new[] { "*.log" }, files.Count, totalBytes, files, true)
+            {
+                PurgeBytes = 2L * gb,
+                PurgeDryRun = true
+            }
+        };
+
+        // Text rendering
+        using var textOut = new StringWriter();
+        new TextRenderer().Render(textOut, new[] { rMixed });
+        var text = textOut.ToString();
+        Assert.Contains("Largest candidate files (2 of 4 matches, 5.0G, 2 smaller than 1.0 GB not shown, would free 2.0G):", text);
+        Assert.Contains(@"C:\t\del.log", text);
+        Assert.Contains(@"C:\t\recent.log", text);
+        Assert.DoesNotContain(@"C:\t\small1.log", text);
+        Assert.DoesNotContain(@"C:\t\small2.log", text);
+        Assert.DoesNotContain("skipped: smaller than", text);
+
+        // HTML rendering
+        using var htmlOut = new StringWriter();
+        new HtmlRenderer(false, 85, 90, 50).Render(htmlOut, new[] { rMixed });
+        var html = htmlOut.ToString();
+        Assert.Contains("2 of 4 matches, 5.0 GB, 2 smaller than 1.0 GB not shown, would free 2.0 GB", html);
+        Assert.Contains(@"C:\t\del.log", html);
+        Assert.Contains(@"C:\t\recent.log", html);
+        Assert.DoesNotContain(@"C:\t\small1.log", html);
+        Assert.DoesNotContain(@"C:\t\small2.log", html);
+        Assert.DoesNotContain("smaller than 1.0 GB</td>", html);
+
+        // All rows skipped: smaller than 1.0 GB
+        var allHiddenFiles = new List<LargestFile> { f3, f4 };
+        var rAllHidden = new ScanResult(@"C:\t", new Volume(@"C:\", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            Largest = new LargestFiles(new[] { "*.log" }, allHiddenFiles.Count, allHiddenFiles.Sum(f => f.LogicalBytes), allHiddenFiles, true)
+            {
+                PurgeBytes = 0L,
+                PurgeDryRun = true
+            }
+        };
+
+        using var allHiddenTextOut = new StringWriter();
+        new TextRenderer().Render(allHiddenTextOut, new[] { rAllHidden });
+        var allHiddenText = allHiddenTextOut.ToString();
+        Assert.Contains("Largest candidate files (0 of 2 matches, 5.0M, 2 smaller than 1.0 GB not shown, would free 0B):", allHiddenText);
+        Assert.Contains("  no files of at least 1.0 GB", allHiddenText);
+        Assert.DoesNotContain(@"C:\t\small1.log", allHiddenText);
+
+        using var allHiddenHtmlOut = new StringWriter();
+        new HtmlRenderer(false, 85, 90, 50).Render(allHiddenHtmlOut, new[] { rAllHidden });
+        var allHiddenHtml = allHiddenHtmlOut.ToString();
+        Assert.Contains("0 of 2 matches, 5.0 MB, 2 smaller than 1.0 GB not shown, would free 0.0 B", allHiddenHtml);
+        Assert.Contains("<tr><td colspan=\"5\">no files of at least 1.0 GB</td></tr>", allHiddenHtml);
+        Assert.DoesNotContain(@"C:\t\small1.log", allHiddenHtml);
+
+        // Positive control: same files without /purge (PurgeStatus = null)
+        var noPurgeFiles = new List<LargestFile>
+        {
+            new(@"C:\t\del.log", 2L * gb, date),
+            new(@"C:\t\recent.log", 3L * gb, date),
+            new(@"C:\t\small1.log", 5L * mb, date),
+            new(@"C:\t\small2.log", 1L * kb, date)
+        };
+        var rNoPurge = new ScanResult(@"C:\t", new Volume(@"C:\", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            Largest = new LargestFiles(new[] { "*.log" }, noPurgeFiles.Count, totalBytes, noPurgeFiles, true)
+        };
+
+        using var noPurgeTextOut = new StringWriter();
+        new TextRenderer().Render(noPurgeTextOut, new[] { rNoPurge });
+        var noPurgeText = noPurgeTextOut.ToString();
+        Assert.Contains("Largest candidate files (4 of 4 matches, 5.0G):", noPurgeText);
+        Assert.Contains(@"C:\t\del.log", noPurgeText);
+        Assert.Contains(@"C:\t\recent.log", noPurgeText);
+        Assert.Contains(@"C:\t\small1.log", noPurgeText);
+        Assert.Contains(@"C:\t\small2.log", noPurgeText);
+        Assert.DoesNotContain("not shown", noPurgeText);
+
+        using var noPurgeHtmlOut = new StringWriter();
+        new HtmlRenderer(false, 85, 90, 50).Render(noPurgeHtmlOut, new[] { rNoPurge });
+        var noPurgeHtml = noPurgeHtmlOut.ToString();
+        Assert.Contains("4 of 4 matches, 5.0 GB", noPurgeHtml);
+        Assert.DoesNotContain("<th>Purge</th>", noPurgeHtml);
+        Assert.DoesNotContain("not shown", noPurgeHtml);
+        Assert.Contains(@"C:\t\del.log", noPurgeHtml);
+        Assert.Contains(@"C:\t\recent.log", noPurgeHtml);
+        Assert.Contains(@"C:\t\small1.log", noPurgeHtml);
+        Assert.Contains(@"C:\t\small2.log", noPurgeHtml);
+
+        // JSON and CSV for mixed set contain all four paths
+        using var jsonOut = new StringWriter();
+        new JsonRenderer().Render(jsonOut, new[] { rMixed });
+        var json = jsonOut.ToString();
+        using var doc = JsonDocument.Parse(json);
+        var jsonFiles = doc.RootElement.GetProperty("targets")[0].GetProperty("largest").GetProperty("files").EnumerateArray().Select(e => e.GetProperty("path").GetString()).ToList();
+        Assert.Contains(@"C:\t\del.log", jsonFiles);
+        Assert.Contains(@"C:\t\recent.log", jsonFiles);
+        Assert.Contains(@"C:\t\small1.log", jsonFiles);
+        Assert.Contains(@"C:\t\small2.log", jsonFiles);
+
+        using var csvOut = new StringWriter();
+        new CsvRenderer(purge: true).Render(csvOut, new[] { rMixed });
+        var csv = csvOut.ToString();
+        Assert.Contains(@"C:\t\del.log", csv);
+        Assert.Contains(@"C:\t\recent.log", csv);
+        Assert.Contains(@"C:\t\small1.log", csv);
+        Assert.Contains(@"C:\t\small2.log", csv);
     }
 }

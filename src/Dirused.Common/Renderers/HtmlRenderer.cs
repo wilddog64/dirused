@@ -81,16 +81,31 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
             foreach (var r in largestGroups)
             {
                 var l = r.Largest!;
-                output.WriteLine($"<tr class=\"group\"><th colspan=\"{(purge ? 5 : 4)}\">{E(Host(r))} {E(r.Target)}: {l.Files.Count} of {l.Matches.ToString("N0", CultureInfo.InvariantCulture)} matches, {E(Format.Size(l.MatchedBytes))}{(l.PurgeBytes is long b ? (l.PurgeDryRun == true ? ", would free " : ", freed ") + E(Format.Size(b)) : "")}{(l.Complete ? "" : " (scan incomplete)")}</th></tr>");
-                var maxBytes = l.Files.Count == 0 ? 0 : l.Files.Max(f => f.LogicalBytes);
-                foreach (var f in l.Files)
+                var shown = l.Files.Where(f => !(f.PurgeStatus != null && f.PurgeStatus.StartsWith("skipped: smaller than ", StringComparison.Ordinal))).ToList();
+                int hidden = l.Files.Count - shown.Count;
+                var firstHidden = l.Files.FirstOrDefault(f => f.PurgeStatus != null && f.PurgeStatus.StartsWith("skipped: smaller than ", StringComparison.Ordinal));
+                string reason = firstHidden != null && firstHidden.PurgeStatus != null && firstHidden.PurgeStatus.Length > "skipped: ".Length
+                    ? firstHidden.PurgeStatus["skipped: ".Length..]
+                    : "";
+                string notShown = hidden > 0 ? $", {hidden} {reason} not shown" : "";
+                output.WriteLine($"<tr class=\"group\"><th colspan=\"{(purge ? 5 : 4)}\">{E(Host(r))} {E(r.Target)}: {shown.Count} of {l.Matches.ToString("N0", CultureInfo.InvariantCulture)} matches, {E(Format.Size(l.MatchedBytes))}{E(notShown)}{(l.PurgeBytes is long b ? (l.PurgeDryRun == true ? ", would free " : ", freed ") + E(Format.Size(b)) : "")}{(l.Complete ? "" : " (scan incomplete)")}</th></tr>");
+                var maxBytes = shown.Count == 0 ? 0 : shown.Max(f => f.LogicalBytes);
+                if (hidden > 0 && shown.Count == 0)
                 {
-                    string cls = f.LogicalBytes >= 10L * 1024 * 1024 * 1024 ? "crit" : f.LogicalBytes >= 1L * 1024 * 1024 * 1024 ? "warn" : "";
-                    string rowClass = cls == "" ? "" : $" class=\"{cls}\"";
-                    double pct = maxBytes <= 0 || f.LogicalBytes <= 0 ? 0 : f.LogicalBytes * 100.0 / maxBytes;
-                    string bar = pct.ToString("0.##", CultureInfo.InvariantCulture);
-                    string barFill = pct == 0 ? "" : $"<span style=\"width:{bar}%\"></span>";
-                    output.WriteLine($"<tr{rowClass}><td>{E(Host(r))}</td><td class=\"num\">{E(Format.Size(f.LogicalBytes))}<span class=\"bar\">{barFill}</span></td><td class=\"date\">{E(f.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-")}</td><td>{E(f.Path)}</td>" + (purge ? $"<td class=\"purge\">{E(f.PurgeStatus)}</td>" : "") + "</tr>");
+                    string minSizeStr = reason.StartsWith("smaller than ", StringComparison.Ordinal) ? reason["smaller than ".Length..] : reason;
+                    output.WriteLine($"<tr><td colspan=\"{(purge ? 5 : 4)}\">no files of at least {E(minSizeStr)}</td></tr>");
+                }
+                else
+                {
+                    foreach (var f in shown)
+                    {
+                        string cls = f.LogicalBytes >= 10L * 1024 * 1024 * 1024 ? "crit" : f.LogicalBytes >= 1L * 1024 * 1024 * 1024 ? "warn" : "";
+                        string rowClass = cls == "" ? "" : $" class=\"{cls}\"";
+                        double pct = maxBytes <= 0 || f.LogicalBytes <= 0 ? 0 : f.LogicalBytes * 100.0 / maxBytes;
+                        string bar = pct.ToString("0.##", CultureInfo.InvariantCulture);
+                        string barFill = pct == 0 ? "" : $"<span style=\"width:{bar}%\"></span>";
+                        output.WriteLine($"<tr{rowClass}><td>{E(Host(r))}</td><td class=\"num\">{E(Format.Size(f.LogicalBytes))}<span class=\"bar\">{barFill}</span></td><td class=\"date\">{E(f.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-")}</td><td>{E(f.Path)}</td>" + (purge ? $"<td class=\"purge\">{E(f.PurgeStatus)}</td>" : "") + "</tr>");
+                    }
                 }
             }
             output.WriteLine("</tbody></table></div>");

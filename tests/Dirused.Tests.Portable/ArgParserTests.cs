@@ -104,7 +104,7 @@ public class ArgParserTests
         Assert.Contains("  /purge [days]       Delete the files /largest lists that were last\n", ArgParser.UsageText);
         Assert.Contains("                      and are at least /minsize big (default: 1GB).\n", ArgParser.UsageText);
         Assert.Contains("  /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,\n", ArgParser.UsageText);
-        Assert.Contains("                      999MB, 2GB (default: 1GB)\n", ArgParser.UsageText);
+        Assert.Contains("                      999MB, 2GB (default: 1GB). Text and HTML output\n", ArgParser.UsageText);
         Assert.Contains("  /confirm            With /purge: really delete. Deletes are permanent\n", ArgParser.UsageText);
         Assert.Contains("Purge examples:\n  dirused D:\\ /largest *.log /purge\n", ArgParser.UsageText);
         Assert.Contains("      Delete the listed .log files of 1GB or more not modified in the last day\n", ArgParser.UsageText);
