@@ -349,4 +349,29 @@ public class RendererTests
         Assert.Contains(@"C:\t\small1.log", csv);
         Assert.Contains(@"C:\t\small2.log", csv);
     }
+
+    [Fact]
+    public void TextRenderingOfPurgeResultWithSmallRecentFileHidesRowAndCountsInNotShown()
+    {
+        var now = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+        const long gb = 1024L * 1024 * 1024;
+        const long mb = 1024L * 1024;
+        var f1 = new LargestFile(@"C:\t\del.log", 2L * gb, now.AddDays(-3));
+        var f2 = new LargestFile(@"C:\t\small-recent.log", 5L * mb, now);
+        var files = new List<LargestFile> { f1, f2 };
+        var rawResult = new ScanResult(@"C:\t", new Volume(@"C:\", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            Largest = new LargestFiles(new[] { "*.log" }, files.Count, files.Sum(f => f.LogicalBytes), files, true)
+        };
+        var run = Purge.Apply(new[] { rawResult }, 1, 1L * gb, false, new PurgeTests.FakeFs(), () => now, null, CancellationToken.None);
+
+        using var w = new StringWriter();
+        new TextRenderer().Render(w, run.Results);
+        var text = w.ToString();
+
+        Assert.Contains("Largest candidate files (1 of 2 matches, 2.0G, 1 smaller than 1.0 GB not shown, would free 2.0G):", text);
+        Assert.Contains(@"C:\t\del.log", text);
+        Assert.DoesNotContain(@"C:\t\small-recent.log", text);
+        Assert.DoesNotContain("skipped: smaller than", text);
+    }
 }
