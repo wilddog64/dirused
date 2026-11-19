@@ -126,7 +126,13 @@ public static class Program
             if (purgeRun != null)
             {
                 if (options.Confirm) error.WriteLine($"Purge: deleted {purgeRun.Deleted} file(s), {Format.Size(purgeRun.DeletedBytes)} freed; {purgeRun.Skipped} skipped; {purgeRun.Failed} failed; {purgeRun.NotAttempted} not attempted. Log: {effectivePurgeLog}");
-                else error.WriteLine($"Purge dry run: {purgeRun.WouldDelete} file(s), {Format.Size(purgeRun.WouldDeleteBytes)} would be deleted; {purgeRun.Skipped} skipped" + (purgeRun.Failed == 0 ? "" : $"; {purgeRun.Failed} could not be checked") + ". Add /confirm to delete them.");
+                else
+                {
+                    string hint = options.PurgeNeedsPatterns
+                        ? " To delete, rerun with /largest <patterns> /purge /confirm, e.g. /largest *.log"
+                        : " Add /confirm to delete them.";
+                    error.WriteLine($"Purge dry run: {purgeRun.WouldDelete} file(s), {Format.Size(purgeRun.WouldDeleteBytes)} would be deleted; {purgeRun.Skipped} skipped" + (purgeRun.Failed == 0 ? "" : $"; {purgeRun.Failed} could not be checked") + "." + hint);
+                }
             }
             if (updateCheck != null) updateChecker!.WaitAfterReport(updateCheck, TimeSpan.FromSeconds(1));
             if (results.Any(r => r.Level == FullnessLevel.Crit)) return 4;

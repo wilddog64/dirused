@@ -201,6 +201,60 @@ public class ProgramPurgeTests
         finally { Directory.Delete(dir, true); }
     }
 
+    [Fact]
+    public void PurgeDryRunWorksWithoutPatternsAndConfirmRefusesMatchAll()
+    {
+        var dir = Scratch();
+        try
+        {
+            var file = Path.Combine(dir, "big.log");
+            using (var fs = File.Create(file)) { fs.SetLength(2L << 30); }
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-3));
+            var log = Path.Combine(dir, "purge.log");
+            string beforeHash = TreeHash(dir);
+
+            using (var output = new StringWriter()) using (var error = new StringWriter())
+            {
+                int dryCode = Program.RunWithPurge(new[] { dir, "/largest", "/purge" }, output, error, log);
+                Assert.Equal(0, dryCode);
+                Assert.Contains("[would delete]", output.ToString());
+                Assert.Contains("To delete, rerun with /largest <patterns> /purge /confirm, e.g. /largest *.log", error.ToString());
+                Assert.False(File.Exists(log));
+                Assert.Equal(beforeHash, TreeHash(dir));
+            }
+
+            using (var output = new StringWriter()) using (var error = new StringWriter())
+            {
+                int confirmCode = Program.RunWithPurge(new[] { dir, "/largest", "*", "/purge", "/confirm" }, output, error, log);
+                Assert.Equal(1, confirmCode);
+                Assert.Contains("/purge /confirm cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log", error.ToString());
+                Assert.False(File.Exists(log));
+                Assert.Equal(beforeHash, TreeHash(dir));
+            }
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    private static string TreeHash(string dir)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        foreach (var file in files)
+        {
+            writer.Write(Path.GetRelativePath(dir, file));
+            var fi = new FileInfo(file);
+            writer.Write(fi.Length);
+            writer.Write(fi.LastWriteTimeUtc.Ticks);
+            using var fs = File.OpenRead(file);
+            byte[] buf = new byte[8192];
+            int read = fs.Read(buf, 0, buf.Length);
+            writer.Write(buf, 0, read);
+        }
+        return Convert.ToHexString(sha.ComputeHash(ms.ToArray()));
+    }
+
     private static bool TryCreateJunction(string junction, string target, out string reason)
     {
         var start = new System.Diagnostics.ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
