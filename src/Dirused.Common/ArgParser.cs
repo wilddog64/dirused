@@ -188,6 +188,7 @@ public static class ArgParser
                     case "largest":
                         largestGiven = true;
                         string? patternArg = null;
+                        largestExplicit = false;
                         if (i + 1 < args.Length)
                         {
                             string next = args[i + 1];

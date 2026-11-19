@@ -65,6 +65,10 @@ public class ArgParserTests
         Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "/purge", "/confirm" }).Error);
         var catalinaNoConfirm = ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge" });
         Assert.Null(catalinaNoConfirm.Error); Assert.True(Property<bool>(catalinaNoConfirm.Options!, "PurgeNeedsPatterns"));
+        Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/largest", "/purge", "/confirm" }).Error);
+        var lastLargest = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/largest", "/purge" });
+        Assert.Null(lastLargest.Error); Assert.True(Property<bool>(lastLargest.Options!, "PurgeNeedsPatterns"));
+        Assert.Null(ArgParser.Parse(new[] { @"C:\", "/largest", "/largest", "*.log", "/purge", "/confirm" }).Error);
         Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge", "/confirm" }).Error);
         foreach (var p in new[] { "*", "*.*", "**", "*?", "+*", "+*.*", "*.log;*" })
         {

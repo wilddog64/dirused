@@ -109,7 +109,7 @@ Purge examples:
       On every server, delete listed .log and .hprof files older than 7 days
 ```
 
-Purging with `/confirm` requires explicit file patterns. Match-all patterns are refused. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
+Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
 
 Each confirmed run appends one tab-separated line per deleted or failed file to `C:\temp\dirused-purge.log`: UTC timestamp, user, machine, path, bytes, and status. Always run without `/confirm` first and read the list. A log still being written (modified today) is skipped; rotate it or stop the service first.
 
