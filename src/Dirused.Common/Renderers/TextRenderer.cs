@@ -79,8 +79,23 @@ public sealed class TextRenderer(int top = 50, bool? exact = null, int? consoleW
     {
         if (largest == null) return;
         if (largest.Matches == 0) { output.WriteLine("Largest candidate files: none matched" + (largest.Complete ? "" : " (scan incomplete)")); return; }
-        output.WriteLine($"Largest candidate files ({largest.Files.Count} of {largest.Matches.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} matches, {size(largest.MatchedBytes)}{(largest.PurgeBytes is long b ? (largest.PurgeDryRun == true ? ", would free " : ", freed ") + size(b) : "") }):" + (largest.Complete ? "" : " (scan incomplete)"));
-        foreach (var file in largest.Files)
-            output.WriteLine($"  {size(file.LogicalBytes)}  {(file.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-")}  {file.Path}{(file.PurgeStatus == null ? "" : $"  [{file.PurgeStatus}]")}");
+        var shown = largest.Files.Where(f => !(f.PurgeStatus != null && f.PurgeStatus.StartsWith("skipped: smaller than ", StringComparison.Ordinal))).ToList();
+        int hidden = largest.Files.Count - shown.Count;
+        var firstHidden = largest.Files.FirstOrDefault(f => f.PurgeStatus != null && f.PurgeStatus.StartsWith("skipped: smaller than ", StringComparison.Ordinal));
+        string reason = firstHidden != null && firstHidden.PurgeStatus != null && firstHidden.PurgeStatus.Length > "skipped: ".Length
+            ? firstHidden.PurgeStatus["skipped: ".Length..]
+            : "";
+        string notShown = hidden > 0 ? $", {hidden} {reason} not shown" : "";
+        output.WriteLine($"Largest candidate files ({shown.Count} of {largest.Matches.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} matches, {size(largest.MatchedBytes)}{notShown}{(largest.PurgeBytes is long b ? (largest.PurgeDryRun == true ? ", would free " : ", freed ") + size(b) : "")}):" + (largest.Complete ? "" : " (scan incomplete)"));
+        if (hidden > 0 && shown.Count == 0)
+        {
+            string minSizeStr = reason.StartsWith("smaller than ", StringComparison.Ordinal) ? reason["smaller than ".Length..] : reason;
+            output.WriteLine($"  no files of at least {minSizeStr}");
+        }
+        else
+        {
+            foreach (var file in shown)
+                output.WriteLine($"  {size(file.LogicalBytes)}  {(file.LastWriteUtc?.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-")}  {file.Path}{(file.PurgeStatus == null ? "" : $"  [{file.PurgeStatus}]")}");
+        }
     }
 }

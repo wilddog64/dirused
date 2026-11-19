@@ -80,7 +80,7 @@ In the HTML report, files of 10 GB or more are red, 1 GB or more amber, and each
 
 ### Purging listed files
 
-`/purge [days]` acts only on the files shown by `/largest [<patterns>]`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files. Purge dry runs work without `/largest` patterns; only `/confirm` requires explicit, non-match-all file patterns.
+`/purge [days]` acts only on the files shown by `/largest [<patterns>]`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files. Purge dry runs work without `/largest` patterns; only `/confirm` requires explicit, non-match-all file patterns. Text and HTML output do not list files smaller than `/minsize`; lower `/minsize` to see them; JSON and CSV list every file.
 
 The help describes the switches this way:
 
@@ -93,7 +93,9 @@ The help describes the switches this way:
                     Without /confirm this is a dry run: nothing is
                     deleted, the report shows what would be.
 /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,
-                    999MB, 2GB (default: 1GB)
+                    999MB, 2GB (default: 1GB). Text and HTML output
+                    do not list files smaller than /minsize; lower
+                    /minsize to see them; JSON and CSV list every file.
 /confirm            With /purge: really delete. Deletes are permanent
                     (admin shares like \\host\d$ skip the Recycle Bin).
                     Each deletion is logged to C:\temp\dirused-purge.log

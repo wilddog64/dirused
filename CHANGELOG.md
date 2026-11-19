@@ -13,6 +13,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- `/purge` text and HTML output omit files smaller than `/minsize` and note how many were hidden; JSON and CSV still list every file.
 - `/purge` dry runs no longer require `/largest` patterns; explicit patterns, non-match-all, and full pattern lists are required only with `/confirm`.
 - Update lookup every 15 minutes (was daily) and always on `/help`. HTML largest-files rows are colored by size and show a size bar.
 - `/file` followed by another switch now says the file name is missing. The update notice also says how to stop checking and links the release notes.
