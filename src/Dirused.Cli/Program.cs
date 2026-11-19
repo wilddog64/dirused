@@ -50,8 +50,17 @@ public static class Program
         }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
-        if (options.Purge && !OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
         string effectivePurgeLog = purgeLogPath ?? PurgeLog.DefaultPath;
+        if (options.SaveList != null && ((options.Output != null && Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase))) { error.WriteLine("/savelist cannot be the output or purge log"); return 1; }
+        if (options.FromList != null)
+        {
+            if ((options.Output != null && Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/fromlist cannot be the output or purge log"); return 1; }
+            if (options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
+            if (!PurgeList.Read(options.FromList, out var parsedList)) { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
+            if (!OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
+            return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs);
+        }
+        if (options.Purge && !OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
         if (options.Purge && options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
         StreamWriter? purgeLog = null;
         if (options.Purge && options.Confirm)
@@ -123,6 +132,11 @@ public static class Program
                 error.WriteLine($"HTML report: {reportPath}");
             }
             else if (fileWriter != null) error.WriteLine($"Report: {reportPath}");
+            if (options.SaveList != null && purgeRun != null)
+            {
+                try { var summary=PurgeList.Summarize(results); PurgeList.Write(options.SaveList, results, options.PurgeDays, options.PurgeMinBytes, version, args); if(summary.NoIdFiles>0) error.WriteLine($"{summary.NoIdFiles} file(s) not saved: no file ID (server does not report one)"); error.WriteLine(summary.SavedFiles==0?"delete list saved: 0 file(s)":$"delete list saved: {summary.SavedFiles} file(s), {Format.Size(summary.SavedBytes)} -> {options.SaveList}"); }
+                catch(Exception ex){error.WriteLine(ex.Message);return 1;}
+            }
             if (purgeRun != null)
             {
                 if (options.Confirm) error.WriteLine($"Purge: deleted {purgeRun.Deleted} file(s), {Format.Size(purgeRun.DeletedBytes)} freed; {purgeRun.Skipped} skipped; {purgeRun.Failed} failed; {purgeRun.NotAttempted} not attempted. Log: {effectivePurgeLog}");
@@ -145,6 +159,27 @@ public static class Program
             fileWriter?.Dispose();
             purgeLog?.Dispose();
         }
+    }
+
+    private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs)
+    {
+        var results=list.Files.GroupBy(f=>f.ListTarget??Path.GetDirectoryName(f.Path)??f.Path,StringComparer.OrdinalIgnoreCase).Select(g=>new ScanResult(g.Key,new Volume("",0,0,0,0),new(),new(),new(),true){ScanRoot=g.Key,Largest=new LargestFiles(Array.Empty<string>(),g.Count(),g.Sum(x=>x.LogicalBytes),g.ToList(),true)}).ToList();
+        StreamWriter? log=null; StreamWriter? report=null; string reportPath="";
+        using var cts = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; cts.Cancel(); };
+        Console.CancelKeyPress += cancelHandler;
+        try {
+            if(options.Confirm){Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);log=new StreamWriter(new FileStream(logPath,FileMode.Append,FileAccess.Write,FileShare.Read)){AutoFlush=true};}
+            TextWriter destination=output;
+            if(options.Output!=null){if(!ReportOutput.TryOpen(options.Output,out report,out reportPath,out var openError)){error.WriteLine(openError);return 1;} if(!options.Html)destination=report!;}
+            var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),()=>DateTime.UtcNow,options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
+            IRenderer renderer=options.Format switch {OutputFormat.Json=>new JsonRenderer(false),OutputFormat.Csv=>new CsvRenderer(false,85,90,true),_=>new TextRenderer()};
+            renderer.Render(destination,run.Results);
+            if(options.Html){new HtmlRenderer(false,85,90,50).Render(report!,run.Results);error.WriteLine($"HTML report: {reportPath}");} else if(report!=null)error.WriteLine($"Report: {reportPath}");
+            if(run.ListErrors>0){error.WriteLine("Bad list lines:");foreach(var e in run.BadListLines)error.WriteLine($"  line {e.Line}: {e.Reason}");}
+            error.WriteLine(options.Confirm?$"Purge: deleted {run.Deleted} file(s), {Format.Size(run.DeletedBytes)} freed; {run.Skipped} skipped; {run.Failed} failed; {run.NotAttempted} not attempted. Log: {logPath}":$"Purge dry run: {run.WouldDelete} file(s), {Format.Size(run.WouldDeleteBytes)} would be deleted; {run.Skipped} skipped.");
+            return run.ListErrors>0||run.Failed>0||run.NotAttempted>0?3:0;
+        } finally { Console.CancelKeyPress -= cancelHandler; report?.Dispose();log?.Dispose(); }
     }
 
     private static (Task? Check, UpdateCheck? Checker) StartUpdateCheck(string[] args, TextWriter error, IReleaseSource? source, string version, string? updateStatePath, bool force)

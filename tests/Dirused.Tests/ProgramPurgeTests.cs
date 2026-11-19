@@ -264,6 +264,52 @@ public class ProgramPurgeTests
         return process.ExitCode == 0;
     }
 
+    [Fact]
+    public void SaveListThenFromListConfirmDeletesOnlyUnchangedListedFiles()
+    {
+        var dir=Scratch();
+        try {
+            var replaced=Path.Combine(dir,"replace.log");var keep=Path.Combine(dir,"keep.log");var appended=Path.Combine(dir,"later.log");
+            File.WriteAllText(replaced,"old replacement content");File.WriteAllText(keep,"keep content");File.SetLastWriteTimeUtc(replaced,DateTime.UtcNow.AddDays(-5));File.SetLastWriteTimeUtc(keep,DateTime.UtcNow.AddDays(-5));
+            var list=Path.Combine(dir,"delete.txt");var log=Path.Combine(dir,"purge.log");using(var o=new StringWriter())using(var e=new StringWriter()){int c=Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/minsize","1B","/savelist",list},o,e,log);Assert.Equal(0,c);Assert.Contains("delete list saved: 2 file(s)",e.ToString());}
+            var savedRows=File.ReadAllLines(list).Skip(6).ToArray();Assert.Equal(2,savedRows.Length);foreach(var row in savedRows){var fields=row.Split('\t');Assert.Equal(6,fields.Length);Assert.Equal(8,fields[1].Length);Assert.Equal(16,fields[2].Length);Assert.True(uint.Parse(fields[1],System.Globalization.NumberStyles.HexNumber)>0);Assert.True(ulong.Parse(fields[2],System.Globalization.NumberStyles.HexNumber)>0);}
+            File.Delete(replaced);File.WriteAllText(replaced,"new replacement content");File.SetLastWriteTimeUtc(replaced,DateTime.UtcNow.AddDays(-5));File.WriteAllText(appended,"new outside list");File.SetLastWriteTimeUtc(appended,DateTime.UtcNow.AddDays(-5));
+            using(var o=new StringWriter())using(var e=new StringWriter()){int c=Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/confirm"},o,e,log);Assert.Equal(0,c);Assert.Contains("skipped: file changed since list (id)",o.ToString());Assert.False(File.Exists(keep));Assert.True(File.Exists(replaced));Assert.True(File.Exists(appended));}
+        } finally {Directory.Delete(dir,true);}
+    }
+
+    [Fact]
+    public void RemovingListLineLeavesThatFileAndDeletesRemainingEntry()
+    {
+        var dir=Scratch();try{var removed=Path.Combine(dir,"removed.log");var kept=Path.Combine(dir,"kept.log");File.WriteAllText(removed,"remove");File.WriteAllText(kept,"keep");File.SetLastWriteTimeUtc(removed,DateTime.UtcNow.AddDays(-4));File.SetLastWriteTimeUtc(kept,DateTime.UtcNow.AddDays(-4));var list=Path.Combine(dir,"delete.txt");var log=Path.Combine(dir,"purge.log");using(var o=new StringWriter())using(var e=new StringWriter())Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/minsize","1B","/savelist",list},o,e,log);var lines=File.ReadAllLines(list);File.WriteAllLines(list,lines.Take(6).Concat(lines.Skip(6).Where(x=>!x.EndsWith("removed.log",StringComparison.OrdinalIgnoreCase))));using var output=new StringWriter();using var error=new StringWriter();int code=Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/confirm"},output,error,log);Assert.Equal(0,code);Assert.True(File.Exists(removed));Assert.False(File.Exists(kept));}finally{Directory.Delete(dir,true);}
+    }
+
+    [Fact]
+    public void BadFromListRowsReportAndSetExitThreeWhileValidPeerRuns()
+    {
+        var dir=Scratch();try{var file=Path.Combine(dir,"valid.log");File.WriteAllText(file,"valid");File.SetLastWriteTimeUtc(file,DateTime.UtcNow.AddDays(-4));var list=Path.Combine(dir,"delete.txt");var log=Path.Combine(dir,"purge.log");using(var o=new StringWriter())using(var e=new StringWriter())Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/minsize","1B","/savelist",list},o,e,log);File.AppendAllText(list,"bad line\r\n");using var output=new StringWriter();using var error=new StringWriter();int code=Program.RunWithPurge(new[]{"/fromlist",list,"/purge"},output,error,log);Assert.Equal(3,code);Assert.Contains("Bad list lines:",error.ToString());Assert.Contains("line 8:",error.ToString());Assert.Contains("would delete",output.ToString());Assert.True(File.Exists(file));}finally{Directory.Delete(dir,true);}
+    }
+
+    [Fact]
+    public void FromListDryRunStatsAnOpenFileWithoutShareDelete()
+    {
+        var dir=Scratch();try{var file=Path.Combine(dir,"held.log");File.WriteAllText(file,"held content");File.SetLastWriteTimeUtc(file,DateTime.UtcNow.AddDays(-4));var list=Path.Combine(dir,"delete.txt");var log=Path.Combine(dir,"purge.log");using(var o=new StringWriter())using(var e=new StringWriter())Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/minsize","1B","/savelist",list},o,e,log);
+            using(var held=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var o=new StringWriter())using(var e=new StringWriter()){int c=Program.RunWithPurge(new[]{"/fromlist",list,"/purge"},o,e,log);Assert.Equal(0,c);Assert.Contains("[would delete]",o.ToString());Assert.True(File.Exists(file));}
+        }finally{Directory.Delete(dir,true);}
+    }
+
+    [Fact]
+    public void SaveAndFromListPathCollisionsAreRejectedBeforeWriting()
+    {
+        var dir=Scratch();try{var list=Path.Combine(dir,"delete.txt");File.WriteAllText(list,"sentinel");using(var o=new StringWriter())using(var e=new StringWriter()){Assert.Equal(1,Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/output",list,"/savelist",list},o,e,Path.Combine(dir,"purge.log")));Assert.Equal("sentinel",File.ReadAllText(list));}var purgeLog=Path.Combine(dir,"purge.log");File.WriteAllText(purgeLog,"log sentinel");using(var o=new StringWriter())using(var e=new StringWriter()){Assert.Equal(1,Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/savelist",purgeLog},o,e,purgeLog));Assert.Equal("log sentinel",File.ReadAllText(purgeLog));}using(var o=new StringWriter())using(var e=new StringWriter()){Assert.Equal(1,Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/output",list},o,e,purgeLog));Assert.Equal("sentinel",File.ReadAllText(list));}using(var o=new StringWriter())using(var e=new StringWriter()){Assert.Equal(1,Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/confirm"},o,e,list));Assert.Equal("sentinel",File.ReadAllText(list));}}finally{Directory.Delete(dir,true);}
+    }
+
+    [Fact]
+    public void InvalidFromListDoesNotCreateOrTruncatePurgeLogOrOutput()
+    {
+        var dir=Scratch();try{var list=Path.Combine(dir,"bad.txt");var log=Path.Combine(dir,"purge.log");var output=Path.Combine(dir,"report.txt");File.WriteAllText(list,"not a list");File.WriteAllText(log,"log sentinel");File.WriteAllText(output,"output sentinel");using var o=new StringWriter();using var e=new StringWriter();int code=Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/confirm","/output",output},o,e,log);Assert.Equal(1,code);Assert.Contains($"not a dirused delete list: {list}",e.ToString());Assert.Equal("log sentinel",File.ReadAllText(log));Assert.Equal("output sentinel",File.ReadAllText(output));}finally{Directory.Delete(dir,true);}
+    }
+
     private static string Scratch()
     {
         string path = Path.Combine(Path.GetTempPath(), "dirused-purge-" + Guid.NewGuid().ToString("N"));
@@ -281,12 +327,14 @@ public class ProgramPurgeTests
         public int OpenCalls { get; private set; }
         public string? ResolveRoot(string path, out string? error) { ResolveCalls++; return inner.ResolveRoot(path, out error); }
         public PurgeOpen Open(string path) { OpenCalls++; return inner.Open(path); }
+        public PurgeFileInfo? Stat(string path, out string? error, out bool notFound) => inner.Stat(path, out error, out notFound);
     }
 
     private sealed class SwapSubfolderOnOpenFileSystem(IPurgeFileSystem inner, string source, string moved, string junction, string outside) : IPurgeFileSystem
     {
         private bool swapped;
         public string? ResolveRoot(string path, out string? error) => inner.ResolveRoot(path, out error);
+        public PurgeFileInfo? Stat(string path, out string? error, out bool notFound) => inner.Stat(path, out error, out notFound);
         public PurgeOpen Open(string path)
         {
             if (!swapped && path.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

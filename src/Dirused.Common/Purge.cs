@@ -9,6 +9,8 @@ namespace Dirused.Common;
 public sealed record PurgeFileInfo(string FinalPath, long Length, DateTime LastWriteUtc, bool IsDirectory, bool IsReparsePoint, int LinkCount)
 {
     public bool IsReadOnly { get; init; }
+    public uint? VolumeSerial { get; init; }
+    public ulong? FileIndex { get; init; }
 }
 
 public sealed class PurgeOpen : IDisposable
@@ -30,9 +32,14 @@ public interface IPurgeFileSystem
 {
     string? ResolveRoot(string path, out string? error);
     PurgeOpen Open(string path);
+    PurgeFileInfo? Stat(string path, out string? error, out bool notFound) { error = "Stat unavailable"; notFound = false; return null; }
 }
 
-public sealed record PurgeRun(IReadOnlyList<ScanResult> Results, int WouldDelete, int Deleted, int Skipped, int Failed, int NotAttempted, long WouldDeleteBytes, long DeletedBytes);
+public sealed record PurgeRun(IReadOnlyList<ScanResult> Results, int WouldDelete, int Deleted, int Skipped, int Failed, int NotAttempted, long WouldDeleteBytes, long DeletedBytes)
+{
+    public int ListErrors { get; init; }
+    public IReadOnlyList<BadPurgeListLine> BadListLines { get; init; } = Array.Empty<BadPurgeListLine>();
+}
 public static class PurgeLog { public const string DefaultPath = @"C:\temp\dirused-purge.log"; }
 
 public static class Purge
@@ -82,6 +89,17 @@ public static class Purge
                 else if (file.LogicalBytes < minBytes) status = $"skipped: smaller than {Dirused.Common.Renderers.Format.Size(minBytes)}";
                 else if (file.LastWriteUtc == null) status = "skipped: modification time unknown";
                 else if (file.LastWriteUtc >= cutoff) status = $"skipped: modified within {days} day(s)";
+                else if (file.FromList && !confirm)
+                {
+                    PurgeFileInfo? stat = null; string? statError = null; bool missing = false;
+                    try { stat = fs.Stat(file.Path, out statError, out missing); } catch (Exception ex) { statError = ex.Message; }
+                    if (missing) status = "skipped: no longer exists";
+                    else if (stat == null) status = "failed: " + (statError ?? "unknown error");
+                    else if (stat.VolumeSerial == null || stat.VolumeSerial != file.VolumeSerial) status = "skipped: file changed since list (volume)";
+                    else if (stat.FileIndex == null || stat.FileIndex != file.FileId) status = "skipped: file changed since list (id)";
+                    else if (stat.Length != file.LogicalBytes || stat.LastWriteUtc != file.LastWriteUtc) status = "skipped: file changed since list (size or time)";
+                    else { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
+                }
                 else if (!confirm) { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
                 else if (targetFinal == null)
                 {
@@ -121,10 +139,12 @@ public static class Purge
             else
             {
                 var info = opened.Info;
-                if (info.IsDirectory || info.IsReparsePoint) status = "skipped: not a regular file";
+                if (file.FromList && (info.VolumeSerial == null || info.VolumeSerial != file.VolumeSerial)) status = "skipped: file changed since list (volume)";
+                else if (file.FromList && (info.FileIndex == null || info.FileIndex != file.FileId)) status = "skipped: file changed since list (id)";
+                else if (info.IsDirectory || info.IsReparsePoint) status = "skipped: not a regular file";
                 else if (info.LinkCount != 1) status = "skipped: hard-linked";
                 else if (!IsStrictlyUnder(info.FinalPath, targetFinal)) status = "skipped: outside target";
-                else if (info.Length != file.LogicalBytes || info.LastWriteUtc != file.LastWriteUtc) status = "skipped: changed since scan";
+                else if (info.Length != file.LogicalBytes || info.LastWriteUtc != file.LastWriteUtc) status = file.FromList ? "skipped: file changed since list (size or time)" : "skipped: changed since scan";
                 else if (info.IsReadOnly) status = "skipped: read-only";
                 else
                 {
@@ -213,6 +233,18 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
         finally { handle?.Dispose(); }
     }
 
+    public PurgeFileInfo? Stat(string path, out string? error, out bool notFound)
+    {
+        error = null; notFound = false;
+        if (!IsAbsoluteWindowsPath(path)) { error = "path is not absolute"; return null; }
+        using var handle = CreateFileW(Extended(path), ReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, OpenReparsePoint | BackupSemantics, IntPtr.Zero);
+        if (handle.IsInvalid) { int e = Marshal.GetLastWin32Error(); notFound = e is 2 or 3; error = new Win32Exception(e).Message; return null; }
+        if (!GetFileInformationByHandle(handle, out var d)) { error = new Win32Exception(Marshal.GetLastWin32Error()).Message; return null; }
+        if (!TryGetFinalPath(handle, finalPathFlags, out var finalPath)) finalPath = path;
+        long size = ((long)d.SizeHigh << 32) | d.SizeLow; long ticks = ((long)d.WriteHigh << 32) | d.WriteLow;
+        return new PurgeFileInfo(finalPath, size, DateTime.FromFileTimeUtc(ticks), (d.Attributes & 0x10) != 0, (d.Attributes & 0x400) != 0, (int)d.Links) { VolumeSerial = d.Volume, FileIndex = ((ulong)d.IndexHigh << 32) | d.IndexLow };
+    }
+
     public PurgeOpen Open(string path)
     {
         if (!IsAbsoluteWindowsPath(path)) return new PurgeOpen("path is not absolute");
@@ -230,7 +262,7 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
             long size = ((long)data.SizeHigh << 32) | data.SizeLow;
             long ticks = ((long)data.WriteHigh << 32) | data.WriteLow;
             var info = new PurgeFileInfo(finalPath, size, DateTime.FromFileTimeUtc(ticks), (data.Attributes & 0x10) != 0, (data.Attributes & 0x400) != 0, (int)data.Links)
-            { IsReadOnly = (data.Attributes & 0x1) != 0 };
+            { IsReadOnly = (data.Attributes & 0x1) != 0, VolumeSerial = data.Volume, FileIndex = ((ulong)data.IndexHigh << 32) | data.IndexLow };
             var owned = handle;
             handle = null;
             return new PurgeOpen(info, owned,

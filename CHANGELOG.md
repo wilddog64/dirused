@@ -7,6 +7,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 ## [Unreleased]
 
 ### Added
+- `/savelist <file>` writes the reviewed `/largest /purge` candidates with NTFS volume serial, file ID, size and exact modified time; `/fromlist <file> /purge` rechecks that identity before deletion. Invalid and duplicate lines are reported and produce exit code 3.
 - `/purge [days]` deletes the files `/largest <patterns>` lists that are older than days (default 1) and at least `/minsize` (default 1GB); a dry run unless `/confirm`; each deletion is logged to `C:\temp\dirused-purge.log`.
 - `/largest` lists the largest log, dump, backup and temp files under each target (patterns overridable); `/largestcount` sets how many.
 - Daily new-release notices on stderr and an explicit `/update` command that verifies the package SHA-256 before replacing `dirused.exe`.

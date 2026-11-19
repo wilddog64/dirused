@@ -96,6 +96,8 @@ The help describes the switches this way:
                     999MB, 2GB (default: 1GB). Text and HTML output
                     do not list files smaller than /minsize; lower
                     /minsize to see them; JSON and CSV list every file.
+/savelist <file>    Save eligible rows after the dry run
+/fromlist <file>    Purge only rows in a saved list (requires /purge)
 /confirm            With /purge: really delete. Deletes are permanent
                     (admin shares like \\host\d$ skip the Recycle Bin).
                     Each deletion is logged to C:\temp\dirused-purge.log
@@ -114,6 +116,16 @@ Purge examples:
 Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
 
 Each confirmed run appends one tab-separated line per deleted or failed file to `C:\temp\dirused-purge.log`: UTC timestamp, user, machine, path, bytes, and status. Always run without `/confirm` first and read the list. A log still being written (modified today) is skipped; rotate it or stop the service first.
+
+To preserve the exact reviewed set, add `/savelist <file>` to a dry run, for example:
+
+```
+dirused \\server\d$\logs /largest *.log /purge /savelist delete.txt
+dirused /fromlist delete.txt /purge
+dirused /fromlist delete.txt /purge /confirm
+```
+
+The UTF-8 delete list stores the target, NTFS volume serial, 64-bit file ID, size and full modified timestamp for each eligible file. You may remove lines before using it; only files whose identity and metadata still match are considered. The list’s saved age and minimum size are used. Bad or duplicate rows are skipped and reported; the command exits 3 when any are present. A file without a reported NTFS ID is not saved. `/fromlist` accepts `/confirm`, `/html`, `/output`, `/json` and `/csv` with `/purge`; it cannot be combined with scan targets or scan options.
 
 ### Switches
 

@@ -26,6 +26,10 @@ public static class Largest
 public sealed record LargestFile(string Path, long LogicalBytes, DateTime? LastWriteUtc)
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public string? PurgeStatus { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore] public ulong? FileId { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore] public uint? VolumeSerial { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore] public bool FromList { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? ListTarget { get; init; }
 }
 public sealed record LargestFiles(IReadOnlyList<string> Patterns, long Matches, long MatchedBytes, List<LargestFile> Files, bool Complete)
 {
@@ -41,11 +45,11 @@ public sealed class LargestCollector
     public long Matches { get; private set; }
     public long MatchedBytes { get; private set; }
     public LargestCollector(int count, IReadOnlyList<string> patterns) { this.count = count; this.patterns = patterns; }
-    public void Offer(string path, string name, long bytes, DateTime? lastWriteUtc)
+    public void Offer(string path, string name, long bytes, DateTime? lastWriteUtc, ulong? fileId = null, uint? volumeSerial = null)
     {
         if (bytes <= 0 || !Largest.Matches(name, patterns)) return;
         Matches++; MatchedBytes = checked(MatchedBytes + bytes);
-        var file = new LargestFile(path, bytes, lastWriteUtc);
+        var file = new LargestFile(path, bytes, lastWriteUtc) { FileId = fileId, VolumeSerial = volumeSerial };
         if (heap.Count < count) heap.Enqueue(file, file);
         else if (Better(file, heap.Peek())) { heap.Dequeue(); heap.Enqueue(file, file); }
     }

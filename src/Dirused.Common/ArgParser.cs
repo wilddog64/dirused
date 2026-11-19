@@ -61,6 +61,8 @@ public static class ArgParser
         "                      999MB, 2GB (default: 1GB). Text and HTML output\n" +
         "                      do not list files smaller than /minsize; lower\n" +
         "                      /minsize to see them; JSON and CSV list every file.\n" +
+        "  /savelist <file>    Save the dry-run delete list\n" +
+        "  /fromlist <file>    Use a saved delete list\n" +
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
         "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
         "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +
@@ -106,12 +108,32 @@ public static class ArgParser
 
     public static ParseResult Parse(string[] args)
     {
+        if (args.Any(a => IsFlag(a,"fromlist")))
+        {
+            const string bad = "/fromlist can only be combined with /purge, /confirm, /html, /output, /json and /csv";
+            string? list=null, outputPath=null; bool fromPurge=false,fromConfirm=false,htmlList=false,jsonList=false,csvList=false;
+            for (int j=0; j<args.Length; j++)
+            {
+                var a=args[j];
+                if (IsFlag(a,"fromlist")) { if (list!=null || ++j>=args.Length) return new(Error:bad); list=args[j]; }
+                else if (IsFlag(a,"purge")) { fromPurge=true; if(j+1<args.Length&&args[j+1].All(char.IsAsciiDigit)) return new(Error:bad); }
+                else if (IsFlag(a,"confirm")) fromConfirm=true;
+                else if (IsFlag(a,"html")) htmlList=true;
+                else if (IsFlag(a,"json")) jsonList=true;
+                else if (IsFlag(a,"csv")) csvList=true;
+                else if (IsFlag(a,"output")) { if(++j>=args.Length || new[]{"json","csv","html","confirm","purge"}.Any(n=>IsFlag(args[j],n))) return new(Error:bad); outputPath=args[j]; }
+                else return new(Error:bad);
+            }
+            if(!fromPurge)return new(Error:"/fromlist requires /purge");
+            if(list==null||jsonList&&csvList)return new(Error:bad);
+            return new(Options:new Options(Array.Empty<string>(),Format:jsonList?OutputFormat.Json:csvList?OutputFormat.Csv:OutputFormat.Text,Html:htmlList,Output:outputPath??(htmlList?DefaultHtmlPath:null),Purge:true,Confirm:fromConfirm,FromList:list));
+        }
         var targets = new List<string>(); int top = 50; bool json = false, csv = false, html = false;
         string? output = null;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
         int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
         IReadOnlyList<string>? largest = null; bool largestGiven = false, largestExplicit = false; int largestCount = 20;
-        bool purge = false, confirm = false, minSizeGiven = false, largestHasAdd = false; int purgeDays = 1; long purgeMinBytes = 1L << 30;
+        bool purge = false, confirm = false, minSizeGiven = false, largestHasAdd = false; string? saveList = null; int purgeDays = 1; long purgeMinBytes = 1L << 30;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -137,6 +159,7 @@ public static class ArgParser
                         }
                         break;
                     case "confirm": confirm = true; break;
+                    case "savelist": if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || new[]{"confirm","summary","purge","savelist","fromlist","output","html","json","csv"}.Any(n=>IsFlag(args[i],n))) return new(Error: "/savelist requires a path"); saveList=args[i]; break;
                     case "minsize":
                         minSizeGiven = true;
                         if (i + 1 >= args.Length || !TryParseMinSize(args[++i], out purgeMinBytes)) return new(Error: "/minsize needs a size like 100MB or 2GB");
@@ -220,6 +243,9 @@ public static class ArgParser
             else if (TargetParser.Parse(arg) != null) targets.Add(arg);
             else return new(Error: $"Invalid target: {arg}");
         }
+        if (saveList != null && !purge) return new(Error: "/savelist requires /purge");
+        if (saveList != null && confirm) return new(Error: "/savelist cannot be used with /confirm");
+        if (saveList != null && summary) return new(Error: "/savelist cannot be used with /summary");
         if (minSizeGiven && !purge) return new(Error: "/minsize requires /purge");
         if (purge && !largestGiven) return new(Error: "/purge requires /largest");
         if (confirm && !purge) return new(Error: "/confirm requires /purge");
@@ -246,7 +272,7 @@ public static class ArgParser
         if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (!largestGiven && args.Any(a => IsFlag(a, "largestcount"))) return new(Error: "/largestcount requires /largest");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes, purgeNeedsPatterns));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes, purgeNeedsPatterns, saveList));
     }
 
     public static string? RejectUnavailable(Options options) => null;

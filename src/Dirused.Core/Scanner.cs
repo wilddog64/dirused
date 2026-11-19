@@ -15,6 +15,8 @@ public sealed class Scanner
     private long clusterSize;
     private string volumeRoot = "";
     private bool stopReported;
+    private bool canRecordFileId;
+    private uint volumeSerial;
 
     public long PerFileCalls { get; private set; }
     public long FallbackDirectories { get; private set; }
@@ -40,6 +42,8 @@ public sealed class Scanner
         string root = Path.GetPathRoot(full) ?? throw new IOException("Target has no volume root.");
         volumeRoot = Unextended(root);
         var volume = Volumes.VolumeProbe.Probe(root);
+        canRecordFileId = string.Equals(volume.FileSystem, "NTFS", StringComparison.OrdinalIgnoreCase) && volume.SerialNumber != 0;
+        volumeSerial = canRecordFileId ? volume.SerialNumber : 0;
         clusterSize = volume.ClusterSize;
         if (clusterSize <= 0) throw new IOException("Invalid volume cluster size.");
         Walk(full, 0, deep, exact, ct, largest);
@@ -161,7 +165,7 @@ public sealed class Scanner
                             }
                             logical += countedLength;
                             disk += allocated;
-                            if (countedLength > 0 && !placeholder) largest?.Offer(childPath, entry.Name, countedLength, entry.LastWriteUtc);
+                            if (countedLength > 0 && !placeholder) largest?.Offer(childPath, entry.Name, countedLength, entry.LastWriteUtc, hasId && canRecordFileId ? entry.FileId : null, canRecordFileId ? volumeSerial : null);
                         }
                     }
                     catch (Exception ex) when (IsScanError(ex)) { errors.Add(new ScanError(childPath, ex.Message)); }

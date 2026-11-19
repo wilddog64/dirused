@@ -10,7 +10,9 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
 
     public void Render(TextWriter output, IReadOnlyList<ScanResult> results)
     {
-        var (volumes, failed) = SummaryRenderer.Prepare(results);
+        var listResults = results.Where(r => r.Largest?.Files.Any(f => f.FromList) == true).ToList();
+        var scanResults = results.Where(r => r.Largest?.Files.Any(f => f.FromList) != true).ToList();
+        var (volumes, failed) = SummaryRenderer.Prepare(scanResults);
         output.WriteLine("<!doctype html>");
         output.WriteLine("<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>dirused report</title>");
         output.WriteLine("<style>:root{font:16px system-ui,sans-serif;color:#202124;background:#fff}body{max-width:1200px;margin:2rem auto;padding:0 1rem}h1{margin-bottom:.2rem}small{color:#666}.scroll{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;width:100%;min-width:680px}th,td{padding:.55rem .7rem;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}th{background:#f2f4f7}td.num{text-align:right;white-space:nowrap}td.date{white-space:nowrap}.crit{background:#fee2e2}.warn{background:#fef3c7}.bar{display:inline-block;width:90px;height:.65rem;background:#ddd;border-radius:1rem;margin-left:.5rem;overflow:hidden}.bar>span{display:block;height:100%;min-width:3px;background:#4b83d1}.crit .bar>span{background:#d93025}.warn .bar>span{background:#f9ab00}.ok .bar>span{background:#1e8e3e}.lvl{font-weight:600;border-radius:.3rem;padding:.1rem .45rem}.crit .lvl{color:#fff;background:#d93025}.warn .lvl{color:#202124;background:#fbbc04}.ok .lvl{color:#fff;background:#1e8e3e}section{margin-top:2rem}code{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){:root{color:#eee;background:#171717}small{color:#bbb}th{background:#292929}td,th{border-color:#444}.crit{background:#542b2b}.warn{background:#51451f}.bar{background:#444}.bar>span{background:#8ab4f8}.ok .bar>span{background:#81c995}.ok .lvl{color:#202124;background:#81c995}}</style></head><body>");
@@ -18,7 +20,7 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         output.WriteLine($"<p>Generated {E(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture))} on {E(Environment.MachineName)} · warn {warn}% / crit {crit}%</p>");
 
         var hostVolumes = volumes.GroupBy(Host, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-        var hosts = results.Select(Host).Distinct(StringComparer.OrdinalIgnoreCase).Select(host => new
+        var hosts = scanResults.Select(Host).Distinct(StringComparer.OrdinalIgnoreCase).Select(host => new
         {
             Host = host,
             Volumes = hostVolumes.TryGetValue(host, out var list) ? list : new List<ScanResult>()
@@ -73,7 +75,7 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
                     output.WriteLine($"<tr><td class=\"num\">{E(Format.Size(entry.LogicalBytes))}</td><td>{E(entry.Path)}</td></tr>");
                 output.WriteLine("</tbody></table></div></section>");
             }
-        var largestGroups = (summary ? volumes : results).Where(r => r.Largest != null).ToList();
+        var largestGroups = (summary ? volumes : results.Where(r => r.Largest?.Files.Any(f => f.FromList) != true).ToList()).Where(r => r.Largest != null).Concat(listResults).ToList();
         if (largestGroups.Count > 0)
         {
             bool purge = largestGroups.Any(r => r.Largest!.Files.Any(f => f.PurgeStatus != null));
