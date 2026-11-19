@@ -29,10 +29,11 @@ public static class PurgeList
         var files = new List<LargestFile>(); var errors = new List<BadPurgeListLine>(); var paths = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
         for (int n=2;n<lines.Length;n++) { string line=lines[n]; if (string.IsNullOrWhiteSpace(line)||line.StartsWith('#')) continue; var f=line.Split('\t',6); string? why=null;
             if(f.Length<6) why="expected 6 fields";
+            else if(string.IsNullOrWhiteSpace(f[0])) why="bad target";
             else if(f[1].Length!=8||!uint.TryParse(f[1],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint serial)||serial==0) why="bad volume serial";
             else if(f[2].Length!=16||!ulong.TryParse(f[2],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out ulong id)||id==0||id==ulong.MaxValue) why="bad file ID";
             else if(!long.TryParse(f[3],NumberStyles.None,CultureInfo.InvariantCulture,out long bytes)||bytes<0) why="bad size";
-            else if(!DateTime.TryParseExact(f[4],"O",CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out var time)) why="bad modification time";
+            else if(!DateTime.TryParseExact(f[4],"O",CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out var time)||time.Kind!=DateTimeKind.Utc) why="bad modification time";
             else if(paths.TryGetValue(f[5],out int prior)) why=$"duplicate of line {prior}";
             if(why!=null){errors.Add(new(n+1,why));continue;} paths[f[5]]=n+1;
             DateTime.TryParseExact(f[4],"O",CultureInfo.InvariantCulture,DateTimeStyles.RoundtripKind,out var dt);

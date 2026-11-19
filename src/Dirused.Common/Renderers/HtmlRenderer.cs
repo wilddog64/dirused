@@ -19,6 +19,8 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
         output.WriteLine("<h1>dirused report</h1>");
         output.WriteLine($"<p>Generated {E(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture))} on {E(Environment.MachineName)} · warn {warn}% / crit {crit}%</p>");
 
+        if (scanResults.Count > 0)
+        {
         var hostVolumes = volumes.GroupBy(Host, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
         var hosts = scanResults.Select(Host).Distinct(StringComparer.OrdinalIgnoreCase).Select(host => new
         {
@@ -67,8 +69,9 @@ public sealed class HtmlRenderer(bool summary, int warn, int crit, int top) : IR
             int w = volumes.Count(r => Fullness.For(r, warn, crit) == FullnessLevel.Warn);
             output.WriteLine($"<p>{volumes.Count} volume(s): {c} at or above {crit}%, {w} at or above {warn}%</p>");
         }
+        }
         if (!summary)
-            foreach (var r in results.Where(r => r.Complete))
+            foreach (var r in scanResults.Where(r => r.Complete))
             {
                 output.WriteLine($"<section><h2>{E(Host(r))} — {E(r.Target)}</h2><div class=\"scroll\"><table><thead><tr><th>Size</th><th>Path</th></tr></thead><tbody>");
                 foreach (var entry in r.Directories.Concat(r.Files).OrderByDescending(e => e.LogicalBytes).ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase).Take(top))

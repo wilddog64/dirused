@@ -39,6 +39,35 @@ public sealed class PurgeListTests
         }finally{File.Delete(p);}
     }
 
+    [Fact] public void FromListDryRunMatchesConfirmSafetyChecksWithoutOpening()
+    {
+        var rows = new[] { Row("readonly"), Row("linked", id: 0x123456789ABCDEF1), Row("reparse", id: 0x123456789ABCDEF2), Row("outside", id: 0x123456789ABCDEF3), Row("peer", id: 0x123456789ABCDEF4) }.Select(f => f with { FromList = true }).ToArray();
+        var fs = new ListFs();
+        fs.Stats[rows[0].Path] = Info(rows[0]) with { IsReadOnly = true };
+        fs.Stats[rows[1].Path] = Info(rows[1]) with { LinkCount = 2 };
+        fs.Stats[rows[2].Path] = Info(rows[2]) with { IsReparsePoint = true };
+        fs.Stats[rows[3].Path] = Info(rows[3]) with { FinalPath = @"C:\outside\file.log" };
+        fs.Stats[rows[4].Path] = Info(rows[4]);
+        var run = Purge.Apply(new[] { Result(rows) }, 1, 1, false, fs, () => DateTime.UtcNow, null, CancellationToken.None);
+        Assert.Equal(new[] { "skipped: read-only", "skipped: hard-linked", "skipped: not a regular file", "skipped: outside target", "would delete" }, run.Results[0].Largest!.Files.Select(f => f.PurgeStatus));
+        Assert.Empty(fs.Opens);
+    }
+
+    [Fact] public void EmptyTargetAndNonUtcTimesAreReportedAsBadRows()
+    {
+        var valid = Row("peer");
+        string Make(string target, string time, string path) => $"{target}\t{valid.VolumeSerial:X8}\t{valid.FileId:X16}\t{valid.LogicalBytes}\t{time}\t{path}";
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, $"{PurgeList.Header}\r\n# purge days=1 minsize=1\r\n{Make("", Old.ToString("O"), "empty-target")}\r\n{Make(@"C:\\logs", "2020-01-01T00:00:00.0000000+01:00", "offset-time")}\r\n{Make(@"C:\\logs", Old.ToString("O"), valid.Path)}\r\n");
+            Assert.True(PurgeList.Read(p, out var parsed));
+            Assert.Equal(new[] { "bad target", "bad modification time" }, parsed!.Errors.Select(e => e.Reason));
+            Assert.Single(parsed.Files);
+        }
+        finally { File.Delete(p); }
+    }
+
     [Fact] public void M4_M8_DryRunStatsOnlyListRowsAndLeavesScanRowsAlone()
     { var l=Row("listed");var s=Row("scan");var r=Result(l with{FromList=true},s);var fs=new ListFs();fs.Stats[l.Path]=Info(l);var run=Purge.Apply(new[]{r},1,1,false,fs,()=>DateTime.UtcNow,null,CancellationToken.None);Assert.Equal("would delete",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal("would delete",run.Results[0].Largest!.Files[1].PurgeStatus);Assert.Equal(new[]{l.Path},fs.StatPaths);Assert.Empty(fs.Opens); }
 
@@ -67,7 +96,7 @@ public sealed class PurgeListTests
     { var f=Row("listed",bytes:500_000_000);var fs=new ListFs();fs.OpenInfos[f.Path]=Info(f);fs.OpenInfos[f.Path+"#verify"]=new PurgeFileInfo(f.Path,0,Old,false,false,1);var res=Result(f with{FromList=true});var run=Purge.Apply(new[]{res},1,100_000_000,true,fs,()=>DateTime.UtcNow,_=>{},CancellationToken.None);Assert.Equal("deleted",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal(1,fs.Deletes); }
 
     [Fact] public void M11_ListReportsHaveNoVolumeLineOrHtmlVolumeTables()
-    { var f=Row("listed") with{FromList=true,PurgeStatus="would delete"};var r=Result(f) with{Volume=new Volume("SECRET-VOLUME",1,2,3,33)};using var text=new StringWriter();new TextRenderer().Render(text,new[]{r});Assert.DoesNotContain("SECRET-VOLUME",text.ToString());using var html=new StringWriter();new HtmlRenderer(false,85,90,50).Render(html,new[]{r});Assert.DoesNotContain("SECRET-VOLUME",html.ToString());Assert.Contains("Largest candidate files",html.ToString()); }
+    { var f=Row("listed") with{FromList=true,PurgeStatus="would delete"};var r=Result(f) with{Volume=new Volume("SECRET-VOLUME",1,2,3,33)};using var text=new StringWriter();new TextRenderer().Render(text,new[]{r});Assert.DoesNotContain("SECRET-VOLUME",text.ToString());using var html=new StringWriter();new HtmlRenderer(false,85,90,50).Render(html,new[]{r});Assert.DoesNotContain("SECRET-VOLUME",html.ToString());Assert.DoesNotContain("<h2>Nodes</h2>",html.ToString());Assert.DoesNotContain("<h2>Volumes</h2>",html.ToString());Assert.DoesNotContain("<section>",html.ToString());Assert.Contains("Largest candidate files",html.ToString()); }
 
     [Fact] public void M7_ParserEnforcesFromListSwitchContract()
     { const string message="/fromlist can only be combined with /purge, /confirm, /html, /output, /json and /csv";foreach(var arg in new[]{new[]{"/fromlist","f","/purge",@"C:\logs"},new[]{"/fromlist","f","/purge","/file","x"},new[]{"/fromlist","f","/purge","/largest","*.log"},new[]{"/fromlist","f","/purge","1"},new[]{"/fromlist","f","/purge","/minsize","1MB"},new[]{"/fromlist","f","/purge","/timeout","2"},new[]{"/fromlist","f","/purge","/savelist","x"}})Assert.Equal(message,ArgParser.Parse(arg).Error);Assert.Equal("/fromlist requires /purge",ArgParser.Parse(new[]{"/fromlist","f"}).Error);Assert.Null(ArgParser.Parse(new[]{"/fromlist","f","/purge"}).Error);Assert.Equal("/savelist requires /purge",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/savelist","f"}).Error);Assert.Equal("/savelist cannot be used with /confirm",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/purge","/confirm","/savelist","f"}).Error);Assert.Equal("/savelist cannot be used with /summary",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/purge","/summary","/savelist","f"}).Error); }

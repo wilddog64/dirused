@@ -12,6 +12,9 @@ public static class ArgParser
         return flag.Equals(name, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool MissingPath(string value) => string.IsNullOrWhiteSpace(value) || KnownSwitches.Any(n => IsFlag(value, n));
+    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update" };
+
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
         "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +
@@ -115,13 +118,13 @@ public static class ArgParser
             for (int j=0; j<args.Length; j++)
             {
                 var a=args[j];
-                if (IsFlag(a,"fromlist")) { if (list!=null || ++j>=args.Length) return new(Error:bad); list=args[j]; }
-                else if (IsFlag(a,"purge")) { fromPurge=true; if(j+1<args.Length&&args[j+1].All(char.IsAsciiDigit)) return new(Error:bad); }
+                if (IsFlag(a,"fromlist")) { if (list!=null) return new(Error:bad); if(++j>=args.Length || MissingPath(args[j])) return new(Error:"/fromlist requires a path"); list=args[j]; }
+                else if (IsFlag(a,"purge")) { fromPurge=true; if(j+1<args.Length&&args[j+1].Length>0&&args[j+1].All(char.IsAsciiDigit)) return new(Error:bad); }
                 else if (IsFlag(a,"confirm")) fromConfirm=true;
                 else if (IsFlag(a,"html")) htmlList=true;
                 else if (IsFlag(a,"json")) jsonList=true;
                 else if (IsFlag(a,"csv")) csvList=true;
-                else if (IsFlag(a,"output")) { if(++j>=args.Length || new[]{"json","csv","html","confirm","purge"}.Any(n=>IsFlag(args[j],n))) return new(Error:bad); outputPath=args[j]; }
+                else if (IsFlag(a,"output")) { if(++j>=args.Length || MissingPath(args[j])) return new(Error:"/output requires a path"); outputPath=args[j]; }
                 else return new(Error:bad);
             }
             if(!fromPurge)return new(Error:"/fromlist requires /purge");
@@ -149,7 +152,7 @@ public static class ArgParser
                     case "csv": csv = true; break;
                     case "html": html = true; break;
                     case "output":
-                        if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/output requires a path");
+                        if (++i >= args.Length || MissingPath(args[i]) || args[i].StartsWith('-') || (args[i].StartsWith('/') && !args[i].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/output requires a path");
                         output = args[i]; break;
                     case "purge":
                         purge = true;
@@ -159,7 +162,7 @@ public static class ArgParser
                         }
                         break;
                     case "confirm": confirm = true; break;
-                    case "savelist": if (++i >= args.Length || string.IsNullOrWhiteSpace(args[i]) || new[]{"confirm","summary","purge","savelist","fromlist","output","html","json","csv"}.Any(n=>IsFlag(args[i],n))) return new(Error: "/savelist requires a path"); saveList=args[i]; break;
+                    case "savelist": if (++i >= args.Length || MissingPath(args[i])) return new(Error: "/savelist requires a path"); saveList=args[i]; break;
                     case "minsize":
                         minSizeGiven = true;
                         if (i + 1 >= args.Length || !TryParseMinSize(args[++i], out purgeMinBytes)) return new(Error: "/minsize needs a size like 100MB or 2GB");
@@ -259,7 +262,11 @@ public static class ArgParser
         if (purge && targets.Any(t => t.Length > 0 && t.All(char.IsAsciiDigit))) return new(Error: "put the number of days right after /purge (e.g. /purge 7)");
         bool effectiveSummary = summary && !deepGiven && !exact;
         if (purge && effectiveSummary && csv && !html) return new(Error: "/purge with /summary /csv needs /html, which lists the files");
-        if (purge && confirm && output != null && Path.GetFullPath(output).Equals(Path.GetFullPath(PurgeLog.DefaultPath), StringComparison.OrdinalIgnoreCase)) return new(Error: "/output cannot be the purge log");
+        if (purge && confirm && output != null)
+        {
+            try { if (Path.GetFullPath(output).Equals(Path.GetFullPath(PurgeLog.DefaultPath), StringComparison.OrdinalIgnoreCase)) return new(Error: "/output cannot be the purge log"); }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return new(Error: $"invalid path: {output}"); }
+        }
         if (file != null)
         {
             if (!TryReadTargetFile(file, out var fileTargets, out var fileError)) return new(Error: fileError);

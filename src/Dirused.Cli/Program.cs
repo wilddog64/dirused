@@ -50,6 +50,11 @@ public static class Program
         }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
+        foreach (var path in new[] { options.SaveList, options.FromList, options.Output }.Where(p => p != null))
+        {
+            try { _ = Path.GetFullPath(path!); }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException) { error.WriteLine($"invalid path: {path}"); return 1; }
+        }
         string effectivePurgeLog = purgeLogPath ?? PurgeLog.DefaultPath;
         if (options.SaveList != null && ((options.Output != null && Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase))) { error.WriteLine("/savelist cannot be the output or purge log"); return 1; }
         if (options.FromList != null)
@@ -169,7 +174,7 @@ public static class Program
         ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; cts.Cancel(); };
         Console.CancelKeyPress += cancelHandler;
         try {
-            if(options.Confirm){Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);log=new StreamWriter(new FileStream(logPath,FileMode.Append,FileAccess.Write,FileShare.Read)){AutoFlush=true};}
+            if(options.Confirm){try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);log=new StreamWriter(new FileStream(logPath,FileMode.Append,FileAccess.Write,FileShare.Read)){AutoFlush=true}; } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException or NotSupportedException) { error.WriteLine($"Cannot open purge log '{logPath}': {ex.Message}; nothing was deleted"); return 1; }}
             TextWriter destination=output;
             if(options.Output!=null){if(!ReportOutput.TryOpen(options.Output,out report,out reportPath,out var openError)){error.WriteLine(openError);return 1;} if(!options.Html)destination=report!;}
             var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),()=>DateTime.UtcNow,options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
@@ -177,7 +182,7 @@ public static class Program
             renderer.Render(destination,run.Results);
             if(options.Html){new HtmlRenderer(false,85,90,50).Render(report!,run.Results);error.WriteLine($"HTML report: {reportPath}");} else if(report!=null)error.WriteLine($"Report: {reportPath}");
             if(run.ListErrors>0){error.WriteLine("Bad list lines:");foreach(var e in run.BadListLines)error.WriteLine($"  line {e.Line}: {e.Reason}");}
-            error.WriteLine(options.Confirm?$"Purge: deleted {run.Deleted} file(s), {Format.Size(run.DeletedBytes)} freed; {run.Skipped} skipped; {run.Failed} failed; {run.NotAttempted} not attempted. Log: {logPath}":$"Purge dry run: {run.WouldDelete} file(s), {Format.Size(run.WouldDeleteBytes)} would be deleted; {run.Skipped} skipped.");
+            error.WriteLine(options.Confirm?$"Purge: deleted {run.Deleted} file(s), {Format.Size(run.DeletedBytes)} freed; {run.Skipped} skipped; {run.Failed} failed; {run.NotAttempted} not attempted. Log: {logPath}":$"Purge dry run: {run.WouldDelete} file(s), {Format.Size(run.WouldDeleteBytes)} would be deleted; {run.Skipped} skipped" + (run.Failed == 0 ? "" : $"; {run.Failed} could not be checked") + ".");
             return run.ListErrors>0||run.Failed>0||run.NotAttempted>0?3:0;
         } finally { Console.CancelKeyPress -= cancelHandler; report?.Dispose();log?.Dispose(); }
     }

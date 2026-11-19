@@ -14,6 +14,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- `/fromlist` dry runs now apply the same regular-file, hard-link, containment and read-only checks as `/confirm`; invalid list paths and purge-log open failures exit cleanly, and list HTML shows only purge results.
 - `/purge` labels files smaller than `/minsize` as `smaller than` before any age check.
 - `/purge` text and HTML output omit files smaller than `/minsize` and note how many were hidden; JSON and CSV still list every file.
 - `/purge` dry runs no longer require `/largest` patterns; explicit patterns, non-match-all, and full pattern lists are required only with `/confirm`.

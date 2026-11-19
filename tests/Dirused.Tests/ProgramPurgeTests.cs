@@ -9,6 +9,23 @@ namespace Dirused.Tests;
 public class ProgramPurgeTests
 {
     [Fact]
+    public void InvalidDeleteListAndOutputPathsAreReportedAsUsageErrors()
+    {
+        foreach (var args in new[]
+        {
+            new[] { @"C:\", "/largest", "*.log", "/purge", "/savelist", "bad\0path" },
+            new[] { "/fromlist", "bad\0path", "/purge" },
+            new[] { "/fromlist", "valid.txt", "/purge", "/output", "bad\0path" }
+        })
+        {
+            using var output = new StringWriter(); using var error = new StringWriter();
+            int code = Program.RunWithPurge(args, output, error, Path.Combine(Path.GetTempPath(), "purge.log"));
+            Assert.Equal(1, code);
+            Assert.Contains("invalid path: bad\0path", error.ToString());
+        }
+    }
+
+    [Fact]
     public void PurgeLogMustOpenBeforeScanning()
     {
         var dir = Scratch();

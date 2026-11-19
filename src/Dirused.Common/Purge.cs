@@ -97,8 +97,19 @@ public static class Purge
                     else if (stat == null) status = "failed: " + (statError ?? "unknown error");
                     else if (stat.VolumeSerial == null || stat.VolumeSerial != file.VolumeSerial) status = "skipped: file changed since list (volume)";
                     else if (stat.FileIndex == null || stat.FileIndex != file.FileId) status = "skipped: file changed since list (id)";
-                    else if (stat.Length != file.LogicalBytes || stat.LastWriteUtc != file.LastWriteUtc) status = "skipped: file changed since list (size or time)";
-                    else { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
+                    else if (stat.IsDirectory || stat.IsReparsePoint) status = "skipped: not a regular file";
+                    else if (stat.LinkCount != 1) status = "skipped: hard-linked";
+                    else
+                    {
+                        string? finalRoot; string? resolveError;
+                        try { finalRoot = fs.ResolveRoot(scanRoot, out resolveError); }
+                        catch (Exception ex) { finalRoot = null; resolveError = ex.Message; }
+                        if (finalRoot == null) status = "failed: cannot open target: " + (resolveError ?? "unknown error");
+                        else if (!IsStrictlyUnder(stat.FinalPath, finalRoot)) status = "skipped: outside target";
+                        else if (stat.Length != file.LogicalBytes || stat.LastWriteUtc != file.LastWriteUtc) status = "skipped: file changed since list (size or time)";
+                        else if (stat.IsReadOnly) status = "skipped: read-only";
+                        else { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
+                    }
                 }
                 else if (!confirm) { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
                 else if (targetFinal == null)
@@ -106,16 +117,15 @@ public static class Purge
                     status = "failed: cannot open target: " + (rootError ?? "unknown error");
                     try { log?.Invoke(LogLine(utcNow(), file.Path, file.LogicalBytes, status)); }
                     catch { stopReason = "log write failed"; }
-                    failed++;
                 }
                 else
                 {
                     status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed);
                     if (status == "deleted") { deleted++; deletedBytes += freed; targetBytes += freed; }
-                    if (status.StartsWith("failed:", StringComparison.Ordinal)) failed++;
                 }
 
                 if (status.StartsWith("skipped:", StringComparison.Ordinal)) skipped++;
+                if (status.StartsWith("failed:", StringComparison.Ordinal)) failed++;
                 if (status.StartsWith("not attempted:", StringComparison.Ordinal)) notAttempted++;
                 files.Add(file with { PurgeStatus = status });
             }
@@ -242,7 +252,7 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
         if (!GetFileInformationByHandle(handle, out var d)) { error = new Win32Exception(Marshal.GetLastWin32Error()).Message; return null; }
         if (!TryGetFinalPath(handle, finalPathFlags, out var finalPath)) finalPath = path;
         long size = ((long)d.SizeHigh << 32) | d.SizeLow; long ticks = ((long)d.WriteHigh << 32) | d.WriteLow;
-        return new PurgeFileInfo(finalPath, size, DateTime.FromFileTimeUtc(ticks), (d.Attributes & 0x10) != 0, (d.Attributes & 0x400) != 0, (int)d.Links) { VolumeSerial = d.Volume, FileIndex = ((ulong)d.IndexHigh << 32) | d.IndexLow };
+        return new PurgeFileInfo(finalPath, size, DateTime.FromFileTimeUtc(ticks), (d.Attributes & 0x10) != 0, (d.Attributes & 0x400) != 0, (int)d.Links) { IsReadOnly = (d.Attributes & 0x1) != 0, VolumeSerial = d.Volume, FileIndex = ((ulong)d.IndexHigh << 32) | d.IndexLow };
     }
 
     public PurgeOpen Open(string path)

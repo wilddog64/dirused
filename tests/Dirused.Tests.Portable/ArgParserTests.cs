@@ -158,6 +158,18 @@ public class ArgParserTests
     }
 
     [Fact]
+    public void DeleteListPathArgumentsRejectSwitchesAndEmptyValues()
+    {
+        Assert.Equal("/fromlist requires a path", ArgParser.Parse(new[] { "/fromlist", "/confirm", "/purge" }).Error);
+        Assert.Equal("/savelist requires a path", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/savelist", "/exact" }).Error);
+        Assert.Equal("/savelist requires a path", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/savelist", "" }).Error);
+        Assert.Equal("/output requires a path", ArgParser.Parse(new[] { "/fromlist", "f", "/purge", "/output", "/fromlist" }).Error);
+        var positive = ArgParser.Parse(new[] { "/fromlist", "f", "/purge", "/output", "r.txt" });
+        Assert.Null(positive.Error);
+        Assert.Equal("r.txt", positive.Options!.Output);
+    }
+
+    [Fact]
     public void ParsesTopAndJson()
     {
         var options = Assert.IsType<Options>(ArgParser.Parse(new[] { ".", "/top", "5", "/json" }).Options);
