@@ -80,7 +80,7 @@ In the HTML report, files of 10 GB or more are red, 1 GB or more amber, and each
 
 ### Purging listed files
 
-`/purge [days]` acts only on the files shown by `/largest <patterns>`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files.
+`/purge [days]` acts only on the files shown by `/largest [<patterns>]`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files. Purge dry runs work without `/largest` patterns; only `/confirm` requires explicit, non-match-all file patterns.
 
 The help describes the switches this way:
 
@@ -88,9 +88,10 @@ The help describes the switches this way:
 /purge [days]       Delete the files /largest lists that were last
                     modified more than [days] days ago (default: 1)
                     and are at least /minsize big (default: 1GB).
-                    Needs /largest with file patterns. Without /confirm
-                    this is a dry run: nothing is deleted, the report
-                    shows what would be.
+                    Patterns are needed only with /confirm; without
+                    them the dry run lists what /largest finds.
+                    Without /confirm this is a dry run: nothing is
+                    deleted, the report shows what would be.
 /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,
                     999MB, 2GB (default: 1GB)
 /confirm            With /purge: really delete. Deletes are permanent
@@ -108,7 +109,7 @@ Purge examples:
       On every server, delete listed .log and .hprof files older than 7 days
 ```
 
-Purging requires explicit file patterns. Match-all patterns are refused. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
+Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
 
 Each confirmed run appends one tab-separated line per deleted or failed file to `C:\temp\dirused-purge.log`: UTC timestamp, user, machine, path, bytes, and status. Always run without `/confirm` first and read the list. A log still being written (modified today) is skipped; rotate it or stop the service first.
 

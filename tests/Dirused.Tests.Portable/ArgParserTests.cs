@@ -52,16 +52,37 @@ public class ArgParserTests
         Assert.Null(basic.Error); Assert.Equal(1L << 30, Property<long>(basic.Options!, "PurgeMinBytes"));
         Assert.True(Property<bool>(basic.Options!, "Purge"));
         Assert.Equal(1, Property<int>(basic.Options!, "PurgeDays")); Assert.False(Property<bool>(basic.Options!, "Confirm"));
+        Assert.False(Property<bool>(basic.Options!, "PurgeNeedsPatterns"));
         var seven = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "7", "/confirm" });
         Assert.Null(seven.Error); Assert.Equal(7, Property<int>(seven.Options!, "PurgeDays")); Assert.True(Property<bool>(seven.Options!, "Confirm"));
+        Assert.False(Property<bool>(seven.Options!, "PurgeNeedsPatterns"));
+        var logConfirm = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/confirm" });
+        Assert.Null(logConfirm.Error); Assert.False(Property<bool>(logConfirm.Options!, "PurgeNeedsPatterns"));
         Assert.Equal("/purge requires /largest", ArgParser.Parse(new[] { @"C:\", "/purge" }).Error);
         Assert.Equal("/confirm requires /purge", ArgParser.Parse(new[] { @"C:\", "/confirm" }).Error);
-        Assert.Equal("/purge requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "/purge" }).Error);
-        Assert.Equal("/purge requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge" }).Error);
+        var noPattern = ArgParser.Parse(new[] { @"C:\", "/largest", "/purge" });
+        Assert.Null(noPattern.Error); Assert.True(Property<bool>(noPattern.Options!, "PurgeNeedsPatterns"));
+        Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "/purge", "/confirm" }).Error);
+        var catalinaNoConfirm = ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge" });
+        Assert.Null(catalinaNoConfirm.Error); Assert.True(Property<bool>(catalinaNoConfirm.Options!, "PurgeNeedsPatterns"));
+        Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/largest", "/purge", "/confirm" }).Error);
+        var lastLargest = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/largest", "/purge" });
+        Assert.Null(lastLargest.Error); Assert.True(Property<bool>(lastLargest.Options!, "PurgeNeedsPatterns"));
+        Assert.Null(ArgParser.Parse(new[] { @"C:\", "/largest", "/largest", "*.log", "/purge", "/confirm" }).Error);
+        Assert.Equal("/purge /confirm requires /largest with file patterns, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", "catalina.out", "/purge", "/confirm" }).Error);
         foreach (var p in new[] { "*", "*.*", "**", "*?", "+*", "+*.*", "*.log;*" })
-            Assert.Equal("/purge cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", p, "/purge" }).Error);
-        Assert.Equal("/purge needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip", ArgParser.Parse(new[] { @"C:\", "/largest", "+*.zip", "/purge" }).Error);
-        Assert.Null(ArgParser.Parse(new[] { @"C:\", "/largest", "*.log;*.zip", "/purge" }).Error);
+        {
+            var matchAll = ArgParser.Parse(new[] { @"C:\", "/largest", p, "/purge" });
+            Assert.Null(matchAll.Error); Assert.True(Property<bool>(matchAll.Options!, "PurgeNeedsPatterns"));
+            Assert.Equal("/purge /confirm cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log", ArgParser.Parse(new[] { @"C:\", "/largest", p, "/purge", "/confirm" }).Error);
+        }
+        var addPattern = ArgParser.Parse(new[] { @"C:\", "/largest", "+*.zip", "/purge" });
+        Assert.Null(addPattern.Error); Assert.True(Property<bool>(addPattern.Options!, "PurgeNeedsPatterns"));
+        Assert.Equal("/purge /confirm needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip", ArgParser.Parse(new[] { @"C:\", "/largest", "+*.zip", "/purge", "/confirm" }).Error);
+        var logZip = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log;*.zip", "/purge" });
+        Assert.Null(logZip.Error); Assert.False(Property<bool>(logZip.Options!, "PurgeNeedsPatterns"));
+        var logZipConfirm = ArgParser.Parse(new[] { @"C:\", "/largest", "*.log;*.zip", "/purge", "/confirm" });
+        Assert.Null(logZipConfirm.Error); Assert.False(Property<bool>(logZipConfirm.Options!, "PurgeNeedsPatterns"));
         Assert.Equal("/purge requires a number of days from 1 to 3650", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "0" }).Error);
         Assert.Equal("/purge requires a number of days from 1 to 3650", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "3651" }).Error);
         Assert.Equal("put the number of days right after /purge (e.g. /purge 7)", ArgParser.Parse(new[] { @"C:\", "/largest", "*.log", "/purge", "/confirm", "7" }).Error);

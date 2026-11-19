@@ -16,7 +16,7 @@ public static class ArgParser
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
         "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +
         "               [/warn [1-100]] [/crit [1-100]]\n" +
-        "              [/largest <patterns> [/purge [days] [/minsize <size>] [/confirm]]]\n" +
+        "            [/largest [<patterns>] [/purge [days] [/minsize <size>] [/confirm]]]\n" +
         "Run dirused /help for more.";
 
     public const string DefaultHtmlPath = @"C:\temp\output.html";
@@ -53,9 +53,10 @@ public static class ArgParser
         "  /purge [days]       Delete the files /largest lists that were last\n" +
         "                      modified more than [days] days ago (default: 1)\n" +
         "                      and are at least /minsize big (default: 1GB).\n" +
-        "                      Needs /largest with file patterns. Without /confirm\n" +
-        "                      this is a dry run: nothing is deleted, the report\n" +
-        "                      shows what would be.\n" +
+        "                      Patterns are needed only with /confirm; without\n" +
+        "                      them the dry run lists what /largest finds.\n" +
+        "                      Without /confirm this is a dry run: nothing is\n" +
+        "                      deleted, the report shows what would be.\n" +
         "  /minsize <size>     With /purge: smallest file to delete, e.g. 100MB,\n" +
         "                      999MB, 2GB (default: 1GB)\n" +
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
@@ -187,6 +188,7 @@ public static class ArgParser
                     case "largest":
                         largestGiven = true;
                         string? patternArg = null;
+                        largestExplicit = false;
                         if (i + 1 < args.Length)
                         {
                             string next = args[i + 1];
@@ -219,9 +221,13 @@ public static class ArgParser
         if (minSizeGiven && !purge) return new(Error: "/minsize requires /purge");
         if (purge && !largestGiven) return new(Error: "/purge requires /largest");
         if (confirm && !purge) return new(Error: "/confirm requires /purge");
-        if (purge && (!largestGiven || !largestExplicit)) return new(Error: "/purge requires /largest with file patterns, e.g. /largest *.log");
-        if (purge && largest!.Any(p => !p.Any(c => c is not ('*' or '?' or '.')))) return new(Error: "/purge cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log");
-        if (purge && largestHasAdd) return new(Error: "/purge needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip");
+        bool purgeNeedsPatterns = purge && !confirm && (!largestExplicit || largest!.Any(p => !p.Any(c => c is not ('*' or '?' or '.'))) || largestHasAdd);
+        if (purge && confirm)
+        {
+            if (!largestExplicit) return new(Error: "/purge /confirm requires /largest with file patterns, e.g. /largest *.log");
+            if (largest!.Any(p => !p.Any(c => c is not ('*' or '?' or '.')))) return new(Error: "/purge /confirm cannot be used with a match-all pattern; name the file types to delete, e.g. /largest *.log");
+            if (largestHasAdd) return new(Error: "/purge /confirm needs the full pattern list; '+' adds to the default list, e.g. write /largest *.log;*.zip");
+        }
         if (purge && targets.Any(t => t.Length > 0 && t.All(char.IsAsciiDigit))) return new(Error: "put the number of days right after /purge (e.g. /purge 7)");
         bool effectiveSummary = summary && !deepGiven && !exact;
         if (purge && effectiveSummary && csv && !html) return new(Error: "/purge with /summary /csv needs /html, which lists the files");
@@ -238,7 +244,7 @@ public static class ArgParser
         if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (!largestGiven && args.Any(a => IsFlag(a, "largestcount"))) return new(Error: "/largestcount requires /largest");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes, purgeNeedsPatterns));
     }
 
     public static string? RejectUnavailable(Options options) => null;
