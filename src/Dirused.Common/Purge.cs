@@ -79,9 +79,9 @@ public static class Purge
                 else if (!IsAbsoluteWindowsPath(file.Path)) status = "failed: path is not absolute";
                 else if (!IsStrictlyUnder(file.Path, scanRoot) || HasUnsafeName(file.Path)) status = "skipped: outside target";
                 else if (IsPurgeLog(file.Path, purgeLogPath)) status = "skipped: purge log";
+                else if (file.LogicalBytes < minBytes) status = $"skipped: smaller than {Dirused.Common.Renderers.Format.Size(minBytes)}";
                 else if (file.LastWriteUtc == null) status = "skipped: modification time unknown";
                 else if (file.LastWriteUtc >= cutoff) status = $"skipped: modified within {days} day(s)";
-                else if (file.LogicalBytes < minBytes) status = $"skipped: smaller than {Dirused.Common.Renderers.Format.Size(minBytes)}";
                 else if (!confirm) { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
                 else if (targetFinal == null)
                 {

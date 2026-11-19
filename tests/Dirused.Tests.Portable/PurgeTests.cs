@@ -34,11 +34,36 @@ public class PurgeTests
         var result = Result(target, files);
         var fs = new FakeFs();
         var run = Purge.Apply(new[] { result }, 1, 1L << 30, false, fs, () => now, _ => throw new Exception(), CancellationToken.None);
-        Assert.Equal(new[] { "skipped: smaller than 1.0 GB", "would delete", "skipped: modified within 1 day(s)", "skipped: modification time unknown", "skipped: modified within 1 day(s)" }, run.Results[0].Largest!.Files.Select(f => f.PurgeStatus));
+        Assert.Equal(new[] { "skipped: smaller than 1.0 GB", "would delete", "skipped: smaller than 1.0 GB", "skipped: smaller than 1.0 GB", "skipped: smaller than 1.0 GB" }, run.Results[0].Largest!.Files.Select(f => f.PurgeStatus));
         Assert.Equal(1L << 30, run.WouldDeleteBytes); Assert.Empty(fs.Opens); Assert.Empty(fs.RootResolutions);
         var lowerThreshold = Purge.Apply(new[] { result }, 1, 100L << 20, false, fs, () => now, null, CancellationToken.None);
         Assert.Equal("would delete", lowerThreshold.Results[0].Largest!.Files[0].PurgeStatus);
         Assert.Equal((1L << 30) - 1 + (1L << 30), lowerThreshold.WouldDeleteBytes);
+    }
+
+    [Fact]
+    public void PurgeLabelsFilesBelowMinSizeBeforeAnyAgeReason()
+    {
+        var now = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+        var target = @"C:\t";
+        const long minBytes = 1L << 30;
+        var files = new List<LargestFile>
+        {
+            new(@"C:\t\small-recent.log", 500L << 20, now),
+            new(@"C:\t\small-unknown.log", 100L << 20, null),
+            new(@"C:\t\large-recent.log", 2L << 30, now),
+            new(@"C:\t\large-old.log", 2L << 30, now.AddDays(-3)),
+            new(@"C:\t\large-unknown.log", 2L << 30, null)
+        };
+        var result = Result(target, files);
+        var fs = new FakeFs();
+        var run = Purge.Apply(new[] { result }, 1, minBytes, false, fs, () => now, null, CancellationToken.None);
+        var statuses = run.Results[0].Largest!.Files.Select(f => f.PurgeStatus).ToArray();
+        Assert.Equal("skipped: smaller than 1.0 GB", statuses[0]);
+        Assert.Equal("skipped: smaller than 1.0 GB", statuses[1]);
+        Assert.Equal("skipped: modified within 1 day(s)", statuses[2]);
+        Assert.Equal("would delete", statuses[3]);
+        Assert.Equal("skipped: modification time unknown", statuses[4]);
     }
 
     [Fact]
@@ -204,7 +229,7 @@ public class PurgeTests
     }
 
     private static ScanResult Result(string target, List<LargestFile> files) => new(target, new Volume("C:", 0, 1, 1, 0), new(), new(), new(), true) { Largest = new LargestFiles(new[] { "*.log" }, files.Count, files.Sum(f => f.LogicalBytes), files, true) };
-    private sealed class FakeFs : IPurgeFileSystem
+    internal sealed class FakeFs : IPurgeFileSystem
     {
         private readonly HashSet<string> pending = new();
         public List<string> Opens { get; } = new(); public List<string> RootResolutions { get; } = new(); public Dictionary<string, PurgeOpen> Errors { get; } = new(); public Dictionary<string, Exception> OpenThrows { get; } = new(); public HashSet<string> DeleteThrows { get; } = new(); public Dictionary<string, long> Lengths { get; } = new(); public Dictionary<string, DateTime> Times { get; } = new(); public Dictionary<string, PurgeFileInfo> Infos { get; } = new(); public HashSet<string> DeletedPaths { get; } = new(); public int Deletes; public int DeletesAttempted; public int Unmarks; public string? RootError; public bool KeepExistingAfterDelete;
