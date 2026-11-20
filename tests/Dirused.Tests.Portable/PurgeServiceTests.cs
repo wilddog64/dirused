@@ -135,7 +135,8 @@ public sealed class PurgeServiceTests
             var run = Purge.Apply(
                 new[] { r }, 1, 1024, true, fs, () => Now, null, CancellationToken.None,
                 services: services, control: control, localNow: () => Now, sleep: _ => {},
-                input: new StringReader(inputStr), inputRedirected: redirected, yes: false, error: err);
+                input: redirected ? new ThrowingRedirectedReader() : new StringReader(inputStr),
+                inputRedirected: redirected, yes: false, error: err);
 
             Assert.Equal("skipped: in use, not confirmed", run.Results[0].Largest!.Files[0].PurgeStatus);
             Assert.Equal(0, handle.StopCalls);
@@ -373,7 +374,7 @@ public sealed class PurgeServiceTests
             StateAfterStart = ServiceState.Running,
             CustomQuery = () =>
             {
-                if (handle.StopCalls > 0)
+                if (handle.StopCalls > 0 && handle.StartCalls == 0)
                 {
                     queryCallsAfterStop++;
                     if (queryCallsAfterStop == 1)
@@ -381,6 +382,7 @@ public sealed class PurgeServiceTests
                         // Stop poll is the first query call after Stop
                         throw new InvalidOperationException("QueryState exploded during stop poll");
                     }
+                    return (ServiceState.Stopped, null);
                 }
                 return (ServiceState.Running, null);
             }
@@ -389,11 +391,12 @@ public sealed class PurgeServiceTests
         control.Services[("h", "tomcat85")] = handle;
 
         DateTime fakeTime = Now;
-        Assert.Throws<InvalidOperationException>(() =>
-            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
-                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                sleep: ts => fakeTime += ts, yes: true));
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
 
+        Assert.Equal("failed: could not stop tomcat85: QueryState exploded during stop poll", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, run.Failed);
         Assert.Equal(1, handle.StopCalls);
         Assert.True(handle.StartCalls >= 1);
     }
@@ -427,23 +430,24 @@ public sealed class PurgeServiceTests
 
         int sleepCallsAfterStop = 0;
         DateTime fakeTime = Now;
-        Assert.Throws<InvalidOperationException>(() =>
-            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
-                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                sleep: ts =>
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts =>
+            {
+                fakeTime += ts;
+                if (handle.StopCalls > 0)
                 {
-                    fakeTime += ts;
-                    if (handle.StopCalls > 0)
+                    sleepCallsAfterStop++;
+                    if (sleepCallsAfterStop == 1)
                     {
-                        sleepCallsAfterStop++;
-                        if (sleepCallsAfterStop == 1)
-                        {
-                            throw new InvalidOperationException("sleep exploded during stop poll");
-                        }
+                        throw new InvalidOperationException("sleep exploded during stop poll");
                     }
-                },
-                yes: true));
+                }
+            },
+            yes: true);
 
+        Assert.Equal("failed: could not stop tomcat85: sleep exploded during stop poll", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, run.Failed);
         Assert.Equal(1, handle.StopCalls);
         Assert.True(handle.StartCalls >= 1);
     }
@@ -476,12 +480,12 @@ public sealed class PurgeServiceTests
         control.Services[("h", "tomcat85")] = handle;
 
         DateTime fakeTime = Now;
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
-                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                sleep: ts => fakeTime += ts, yes: true));
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
 
-        Assert.Equal("Stop crashed", ex.Message);
+        Assert.Equal("failed: could not stop tomcat85: Stop crashed", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, run.Failed);
         Assert.Equal(1, handle.StopCalls);
         Assert.Equal(1, handle.StartCalls);
     }
@@ -514,14 +518,174 @@ public sealed class PurgeServiceTests
         control.Services[("h", "tomcat85")] = handle;
 
         DateTime fakeTime = Now;
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
-                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                sleep: ts => fakeTime += ts, yes: true));
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
 
-        Assert.Equal("Stop crashed", ex.Message);
+        Assert.Equal("failed: could not stop tomcat85: Stop crashed", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, run.Failed);
         Assert.Equal(1, handle.StopCalls);
         Assert.Equal(0, handle.StartCalls);
+    }
+
+    [Fact]
+    public void StopThrows_SecondGroupStillProcessedNormally()
+    {
+        string p1 = @"\\h1\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        string p2 = @"\\h2\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+
+        var f1 = new LargestFile(p1, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var f2 = new LargestFile(p2, 100_000_000, Now) { VolumeSerial = 2, FileId = 2 };
+
+        var r1 = new ScanResult(@"\\h1\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h1\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f1.LogicalBytes, new List<LargestFile> { f1 }, true)
+        };
+        var r2 = new ScanResult(@"\\h2\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h2\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f2.LogicalBytes, new List<LargestFile> { f2 }, true)
+        };
+
+        var services = new FakeServices();
+        services.Hosts["h1"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+        services.Hosts["h2"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p1] = true;
+        fs.HeldProbes[p2] = true;
+        fs.Stats[p1] = new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.Stats[p2] = new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+        fs.OpenAfterStop[p2] = () => new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+
+        var handle1 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            OnStop = () => throw new InvalidOperationException("Stop crashed on h1")
+        };
+        var handle2 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running
+        };
+
+        var control = new FakeServiceControl();
+        control.Services[("h1", "tomcat85")] = handle1;
+        control.Services[("h2", "tomcat85")] = handle2;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(
+            new[] { r1, r2 }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("failed: could not stop tomcat85: Stop crashed on h1", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal("deleted", run.Results[1].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, handle1.StopCalls);
+        Assert.Equal(1, handle1.StartCalls);
+        Assert.Equal(1, handle2.StopCalls);
+        Assert.Equal(1, handle2.StartCalls);
+        Assert.Equal(1, run.Failed);
+        Assert.Equal(1, run.Deleted);
+    }
+
+    [Fact]
+    public void StartFinally_QueryStateThrowsInPreWait_StartStillCalled()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.OpenAfterStop[p] = () => new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        int queryCallsAfterStop = 0;
+        FakeServiceHandle handle = null!;
+        handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            CustomQuery = () =>
+            {
+                if (handle.StopCalls > 0 && handle.StartCalls == 0)
+                {
+                    queryCallsAfterStop++;
+                    if (queryCallsAfterStop == 1)
+                    {
+                        // Stop poll: return Stopped so stop succeeds
+                        return (ServiceState.Stopped, null);
+                    }
+                    // Pre-wait query call in finally: throw
+                    throw new InvalidOperationException("QueryState exploded in pre-wait");
+                }
+                return (ServiceState.Running, null);
+            }
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.False(run.ServiceStartFailed);
+        Assert.Equal(1, handle.StopCalls);
+        Assert.Equal(1, handle.StartCalls);
+    }
+
+    [Fact]
+    public void StartFinally_StartThrowsOnAttempt0_SecondAttemptRuns_FailsAndReturnsNormally()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.OpenAfterStop[p] = () => new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        FakeServiceHandle handle = null!;
+        handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            CustomStart = () => throw new InvalidOperationException("Start exploded on attempt")
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.True(run.ServiceStartFailed);
+        Assert.Equal(1, handle.StopCalls);
+        Assert.Equal(2, handle.StartCalls);
     }
 
     [Fact]
@@ -1671,5 +1835,10 @@ public sealed class PurgeServiceTests
             if (HeldProbes.TryGetValue(path, out var held)) return held;
             return false;
         }
+    }
+
+    private sealed class ThrowingRedirectedReader : TextReader
+    {
+        public override string? ReadLine() => throw new InvalidOperationException("must not read redirected input");
     }
 }

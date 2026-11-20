@@ -677,88 +677,97 @@ public static class Purge
                 try
                 {
                     (stopOk, stopErr) = handle.Stop();
+
+                    if (!stopOk)
+                    {
+                        if (stopErr is 1051 or 1062)
+                        {
+                            string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                            foreach (var row in stayingRows)
+                            {
+                                AssignStatus(row, st);
+                                failed++;
+                                try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                                catch { stopReason = "log write failed"; }
+                            }
+                            continue;
+                        }
+
+                        var (postStopState, _) = handle.QueryState();
+                        if (postStopState == ServiceState.Running)
+                        {
+                            string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                            foreach (var row in stayingRows)
+                            {
+                                AssignStatus(row, st);
+                                failed++;
+                                try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                                catch { stopReason = "log write failed"; }
+                            }
+                            continue;
+                        }
+
+                        owned = true;
+                        string stOwned = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                        foreach (var row in stayingRows)
+                        {
+                            AssignStatus(row, stOwned);
+                            failed++;
+                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stOwned)); }
+                            catch { stopReason = "log write failed"; }
+                        }
+                    }
+                    else
+                    {
+                        owned = true;
+                        DateTime pollStart = utcNow();
+                        bool isStopped = false;
+                        while ((utcNow() - pollStart).TotalSeconds < 120)
+                        {
+                            var (s, _) = handle.QueryState();
+                            if (s == ServiceState.Stopped)
+                            {
+                                isStopped = true;
+                                break;
+                            }
+                            sleep(TimeSpan.FromSeconds(2));
+                        }
+
+                        if (!isStopped)
+                        {
+                            stopTimedOut = true;
+                            string st = $"failed: could not stop {group.ServiceKey}: timed out";
+                            foreach (var row in stayingRows)
+                            {
+                                AssignStatus(row, st);
+                                failed++;
+                                try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                                catch { stopReason = "log write failed"; }
+                            }
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
                     try
                     {
                         var (postStopState, _) = handle.QueryState();
-                        if (postStopState != ServiceState.Running)
-                        {
-                            owned = true;
-                        }
+                        owned = postStopState != ServiceState.Running;
                     }
-                    catch { }
-                    throw;
-                }
-
-                if (!stopOk)
-                {
-                    if (stopErr is 1051 or 1062)
+                    catch
                     {
-                        string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
-                        foreach (var row in stayingRows)
-                        {
-                            AssignStatus(row, st);
-                            failed++;
-                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                            catch { stopReason = "log write failed"; }
-                        }
-                        continue;
+                        owned = true;
                     }
 
-                    var (postStopState, _) = handle.QueryState();
-                    if (postStopState == ServiceState.Running)
-                    {
-                        string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
-                        foreach (var row in stayingRows)
-                        {
-                            AssignStatus(row, st);
-                            failed++;
-                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                            catch { stopReason = "log write failed"; }
-                        }
-                        continue;
-                    }
-
-                    owned = true;
-                    string stOwned = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                    string stEx = $"failed: could not stop {group.ServiceKey}: {ex.Message}";
                     foreach (var row in stayingRows)
                     {
-                        AssignStatus(row, stOwned);
+                        AssignStatus(row, stEx);
                         failed++;
-                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stOwned)); }
+                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stEx)); }
                         catch { stopReason = "log write failed"; }
                     }
-                }
-                else
-                {
-                    owned = true;
-                    DateTime pollStart = utcNow();
-                    bool isStopped = false;
-                    while ((utcNow() - pollStart).TotalSeconds < 120)
-                    {
-                        var (s, _) = handle.QueryState();
-                        if (s == ServiceState.Stopped)
-                        {
-                            isStopped = true;
-                            break;
-                        }
-                        sleep(TimeSpan.FromSeconds(2));
-                    }
-
-                    if (!isStopped)
-                    {
-                        stopTimedOut = true;
-                        string st = $"failed: could not stop {group.ServiceKey}: timed out";
-                        foreach (var row in stayingRows)
-                        {
-                            AssignStatus(row, st);
-                            failed++;
-                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                            catch { stopReason = "log write failed"; }
-                        }
-                    }
+                    continue;
                 }
 
                 if (owned && !stopTimedOut && stopOk)
@@ -812,87 +821,102 @@ public static class Purge
 
                     for (int attempt = 0; attempt < 2 && !verified; attempt++)
                     {
-                        DateTime waitStopPendingStart = utcNow();
-                        while ((utcNow() - waitStopPendingStart).TotalSeconds < 300)
+                        try
                         {
-                            var (st, _) = handle.QueryState();
-                            if (st != ServiceState.StopPending) break;
-                            sleep(TimeSpan.FromSeconds(2));
-                        }
-
-                        var (startSuccess, sErr) = handle.Start();
-                        if (!startSuccess)
-                        {
-                            if (sErr == 1056)
+                            try
                             {
-                                var (s1056, _) = handle.QueryState();
-                                if (s1056 == ServiceState.StopPending)
+                                DateTime waitStopPendingStart = utcNow();
+                                while ((utcNow() - waitStopPendingStart).TotalSeconds < 300)
                                 {
-                                    DateTime waitSecond = utcNow();
-                                    while ((utcNow() - waitSecond).TotalSeconds < 300)
+                                    var (st, _) = handle.QueryState();
+                                    if (st != ServiceState.StopPending) break;
+                                    sleep(TimeSpan.FromSeconds(2));
+                                }
+                            }
+                            catch
+                            {
+                                // stop waiting and go straight to handle.Start()
+                            }
+
+                            var (startSuccess, sErr) = handle.Start();
+                            if (!startSuccess)
+                            {
+                                if (sErr == 1056)
+                                {
+                                    var (s1056, _) = handle.QueryState();
+                                    if (s1056 == ServiceState.StopPending)
                                     {
-                                        var (stWait, _) = handle.QueryState();
-                                        if (stWait != ServiceState.StopPending) break;
-                                        sleep(TimeSpan.FromSeconds(2));
+                                        DateTime waitSecond = utcNow();
+                                        while ((utcNow() - waitSecond).TotalSeconds < 300)
+                                        {
+                                            var (stWait, _) = handle.QueryState();
+                                            if (stWait != ServiceState.StopPending) break;
+                                            sleep(TimeSpan.FromSeconds(2));
+                                        }
+                                        handle.Start();
                                     }
+                                }
+                                else
+                                {
+                                    sleep(TimeSpan.FromSeconds(5));
                                     handle.Start();
                                 }
                             }
-                            else
+
+                            DateTime pollRunningStart = utcNow();
+                            bool reachedRunning = false;
+                            while ((utcNow() - pollRunningStart).TotalSeconds < 120)
                             {
-                                sleep(TimeSpan.FromSeconds(5));
-                                handle.Start();
+                                var (st, _) = handle.QueryState();
+                                finalReportedState = st;
+                                if (st == ServiceState.Running)
+                                {
+                                    reachedRunning = true;
+                                    break;
+                                }
+                                sleep(TimeSpan.FromSeconds(2));
                             }
-                        }
 
-                        DateTime pollRunningStart = utcNow();
-                        bool reachedRunning = false;
-                        while ((utcNow() - pollRunningStart).TotalSeconds < 120)
-                        {
-                            var (st, _) = handle.QueryState();
-                            finalReportedState = st;
-                            if (st == ServiceState.Running)
+                            if (!reachedRunning)
                             {
-                                reachedRunning = true;
-                                break;
+                                failedReason = "timed out waiting for RUNNING";
+                                continue;
                             }
-                            sleep(TimeSpan.FromSeconds(2));
-                        }
 
-                        if (!reachedRunning)
-                        {
-                            failedReason = "timed out waiting for RUNNING";
-                            continue;
-                        }
-
-                        try
-                        {
-                            log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-start"));
-                        }
-                        catch (Exception ex)
-                        {
-                            try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
-                        }
-
-                        sleep(TimeSpan.FromSeconds(60));
-                        var (settledState, _) = handle.QueryState();
-                        finalReportedState = settledState;
-                        if (settledState == ServiceState.Running)
-                        {
-                            verified = true;
                             try
                             {
-                                log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-started"));
+                                log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-start"));
                             }
                             catch (Exception ex)
                             {
                                 try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
                             }
-                            break;
+
+                            sleep(TimeSpan.FromSeconds(60));
+                            var (settledState, _) = handle.QueryState();
+                            finalReportedState = settledState;
+                            if (settledState == ServiceState.Running)
+                            {
+                                verified = true;
+                                try
+                                {
+                                    log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-started"));
+                                }
+                                catch (Exception ex)
+                                {
+                                    try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
+                                }
+                                break;
+                            }
+                            else
+                            {
+                                failedReason = "stopped after settle";
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            failedReason = "stopped after settle";
+                            failedReason = ex.Message;
+                            continue;
                         }
                     }
 
