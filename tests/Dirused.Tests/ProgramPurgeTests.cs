@@ -343,13 +343,13 @@ public class ProgramPurgeTests
             var handle = new FailingStartServiceHandle();
             var control = new TestServiceControl(handle);
 
-            // 1. Scan path with /crit 1 (which would be exit 4 if not for start failure)
+            // 1. Scan path with /warn 1 /crit 2 (which would be exit 4 if not for start failure)
             using (var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var output = new StringWriter())
             using (var error = new StringWriter())
             {
                 int code = Program.RunWithPurge(
-                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm", "/yes", "/crit", "1" },
+                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm", "/yes", "/warn", "1", "/crit", "2" },
                     output, error, Path.Combine(dir, "purge.log"),
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
