@@ -16,6 +16,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- The delete list (`/savelist`) format is updated to v2 (`# dirused delete list v2`): modification times and `# created=` use local time with explicit offset and 7-digit subsecond fraction (`yyyy-MM-dd HH:mm:ss.fffffff zzz`), readable at a glance without manual time zone conversion. `/fromlist` reads both v2 and legacy v1 lists and preserves exact UTC ticks.
 - `/confirm` now checks NTFS volume serial and file ID for scan rows (`skipped: changed since scan (id)`) before deletion.
 - D1 age exemption: held Tomcat redirect logs are exempt from the purge age rule.
 - `/fromlist` dry runs now apply the same regular-file, hard-link, containment and read-only checks as `/confirm`; invalid list paths and purge-log open failures exit cleanly, and list HTML shows only purge results.
