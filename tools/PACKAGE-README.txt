@@ -33,6 +33,7 @@ Exit codes
   3  at least one target incomplete, failed or timed out
      (the others still report)
   4  at least one volume at or above /crit; takes precedence over 3
+     (except when a service start fails, which returns 3)
 
 Live checks
   powershell -ExecutionPolicy Bypass -File .\live-check.ps1

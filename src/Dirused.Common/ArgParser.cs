@@ -13,13 +13,14 @@ public static class ArgParser
     }
 
     private static bool MissingPath(string value) => string.IsNullOrWhiteSpace(value) || KnownSwitches.Any(n => IsFlag(value, n));
-    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update" };
+    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update", "yes" };
 
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
         "               [/top N] [/json|/csv] [/html] [/output <path>]\n" +
         "               [/warn [1-100]] [/crit [1-100]]\n" +
-        "            [/largest [<patterns>] [/purge [days] [/minsize <size>] [/confirm]]]\n" +
+        "            [/largest [<patterns>] [/purge [days] [/minsize <size>]\n" +
+        "                      [/confirm] [/yes]]]\n" +
         "Run dirused /help for more.";
 
     public const string DefaultHtmlPath = @"C:\temp\output.html";
@@ -69,6 +70,7 @@ public static class ArgParser
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
         "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
         "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +
+        "  /yes                With /purge /confirm: non-interactive (19:00-06:00 only)\n" +
         "  /timeout <n>[s|m|h] Per-target timeout, > 0 (default: none)\n" +
         "  /parallel <n>       Max concurrent scans, 1-64 (default: 4)\n" +
         "  /help               Show this help\n" +
@@ -81,6 +83,8 @@ public static class ArgParser
         "      Dry run: list what would be deleted, delete nothing\n" +
         "  dirused D:\\ /largest *.log /purge /confirm\n" +
         "      Delete the listed .log files of 1GB or more not modified in the last day\n" +
+        "  dirused D:\\ /largest *.log /purge /confirm /yes\n" +
+        "      Delete without prompting (only permitted between 19:00 and 06:00)\n" +
         "  dirused D:\\ /largest *.log /purge /minsize 100MB\n" +
         "      Dry run: also include listed .log files from 100MB\n" +
         "  dirused /file servers.txt /largest *.log;*.hprof /purge 7 /confirm\n" +
@@ -94,7 +98,8 @@ public static class ArgParser
         "  0  All targets completed\n" +
         "  1  Usage error or unreadable target file\n" +
         "  3  Any target incomplete, failed, timed out, or a /purge did not finish\n" +
-        "  4  Any volume at or above /crit (takes precedence over 3)";
+        "  4  Any volume at or above /crit (takes precedence over 3,\n" +
+        "     except when a service start failed)";
 
     public const string MultiTargetWarning =
         "dirused: /deep and /exact walk every target in full; add /timeout <n> to bound each one, or use /summary for a quick fleet check";
@@ -113,8 +118,8 @@ public static class ArgParser
     {
         if (args.Any(a => IsFlag(a,"fromlist")))
         {
-            const string bad = "/fromlist can only be combined with /purge, /confirm, /html, /output, /json and /csv";
-            string? list=null, outputPath=null; bool fromPurge=false,fromConfirm=false,htmlList=false,jsonList=false,csvList=false;
+            const string bad = "/fromlist can only be combined with /purge, /confirm, /html, /output, /json, /csv and /yes";
+            string? list=null, outputPath=null; bool fromPurge=false,fromConfirm=false,htmlList=false,jsonList=false,csvList=false,fromYes=false;
             for (int j=0; j<args.Length; j++)
             {
                 var a=args[j];
@@ -124,19 +129,21 @@ public static class ArgParser
                 else if (IsFlag(a,"html")) htmlList=true;
                 else if (IsFlag(a,"json")) jsonList=true;
                 else if (IsFlag(a,"csv")) csvList=true;
+                else if (IsFlag(a,"yes")) fromYes=true;
                 else if (IsFlag(a,"output")) { if(++j>=args.Length || MissingPath(args[j])) return new(Error:"/output requires a path"); outputPath=args[j]; }
                 else return new(Error:bad);
             }
             if(!fromPurge)return new(Error:"/fromlist requires /purge");
+            if(fromYes&&(!fromPurge||!fromConfirm))return new(Error:"/yes needs /purge /confirm");
             if(list==null||jsonList&&csvList)return new(Error:bad);
-            return new(Options:new Options(Array.Empty<string>(),Format:jsonList?OutputFormat.Json:csvList?OutputFormat.Csv:OutputFormat.Text,Html:htmlList,Output:outputPath??(htmlList?DefaultHtmlPath:null),Purge:true,Confirm:fromConfirm,FromList:list));
+            return new(Options:new Options(Array.Empty<string>(),Format:jsonList?OutputFormat.Json:csvList?OutputFormat.Csv:OutputFormat.Text,Html:htmlList,Output:outputPath??(htmlList?DefaultHtmlPath:null),Purge:true,Confirm:fromConfirm,FromList:list,Yes:fromYes));
         }
         var targets = new List<string>(); int top = 50; bool json = false, csv = false, html = false;
         string? output = null;
         string? file = null; bool summary = false; TimeSpan? timeout = null; int? parallel = null;
         int deep = 1; bool deepGiven = false; bool exact = false; int warn = 85, crit = 90;
         IReadOnlyList<string>? largest = null; bool largestGiven = false, largestExplicit = false; int largestCount = 20;
-        bool purge = false, confirm = false, minSizeGiven = false, largestHasAdd = false; string? saveList = null; int purgeDays = 1; long purgeMinBytes = 1L << 30;
+        bool purge = false, confirm = false, minSizeGiven = false, largestHasAdd = false; string? saveList = null; int purgeDays = 1; long purgeMinBytes = 1L << 30; bool yes = false;
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i], name = arg.TrimStart('/', '-').ToLowerInvariant();
@@ -162,6 +169,7 @@ public static class ArgParser
                         }
                         break;
                     case "confirm": confirm = true; break;
+                    case "yes": yes = true; break;
                     case "savelist": if (++i >= args.Length || MissingPath(args[i])) return new(Error: "/savelist requires a path"); saveList=args[i]; break;
                     case "minsize":
                         minSizeGiven = true;
@@ -252,6 +260,7 @@ public static class ArgParser
         if (minSizeGiven && !purge) return new(Error: "/minsize requires /purge");
         if (purge && !largestGiven) return new(Error: "/purge requires /largest");
         if (confirm && !purge) return new(Error: "/confirm requires /purge");
+        if (yes && (!purge || !confirm)) return new(Error: "/yes needs /purge /confirm");
         bool purgeNeedsPatterns = purge && !confirm && (!largestExplicit || largest!.Any(p => !p.Any(c => c is not ('*' or '?' or '.'))) || largestHasAdd);
         if (purge && confirm)
         {
@@ -279,7 +288,7 @@ public static class ArgParser
         if (warn >= crit) return new(Error: "/warn must be below /crit");
         if (!largestGiven && args.Any(a => IsFlag(a, "largestcount"))) return new(Error: "/largestcount requires /largest");
         if (targets.Count == 0 || (json && csv)) return new(Error: ShortUsageText);
-        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes, purgeNeedsPatterns, saveList));
+        return new(Options: new Options(targets, top, json ? OutputFormat.Json : csv ? OutputFormat.Csv : OutputFormat.Text, file, effectiveSummary, timeout, parallel, deep, exact, deepGiven, warn, crit, html, output ?? (html ? DefaultHtmlPath : null), largest, largestCount, purge, purgeDays, confirm, purgeMinBytes, purgeNeedsPatterns, saveList, Yes: yes));
     }
 
     public static string? RejectUnavailable(Options options) => null;

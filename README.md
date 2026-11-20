@@ -101,6 +101,8 @@ The help describes the switches this way:
 /confirm            With /purge: really delete. Deletes are permanent
                     (admin shares like \\host\d$ skip the Recycle Bin).
                     Each deletion is logged to C:\temp\dirused-purge.log
+/yes                With /purge /confirm: proceed without prompt
+                    (stops Tomcat only between 19:00 and 06:00)
 
 Purge examples:
   dirused D:\ /largest *.log /purge
@@ -113,7 +115,7 @@ Purge examples:
       On every server, delete listed .log and .hprof files older than 7 days
 ```
 
-Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed and processing continues. Dry runs do not open files.
+Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed, except Tomcat redirect logs which can be deleted by stopping Tomcat under `/confirm` (or `/yes` off-hours). Dry runs do not open files.
 
 Each confirmed run appends one tab-separated line per deleted or failed file to `C:\temp\dirused-purge.log`: UTC timestamp, user, machine, path, bytes, and status. Always run without `/confirm` first and read the list. A log still being written (modified today) is skipped; rotate it or stop the service first.
 
@@ -163,7 +165,7 @@ Exit codes:
   0  All targets completed
   1  Usage error or unreadable target file
   3  Any target incomplete, failed, or timed out
-  4  Any volume at or above /crit (takes precedence over 3)
+  4  Any volume at or above /crit (takes precedence over 3; service start failure returns 3)
 ```
 
 Sample `targets.txt`:
@@ -175,7 +177,7 @@ Sample `targets.txt`:
 When a scan is stopped by a timeout or cancellation, its errors name the folder in progress as `<path>: not finished: scan stopped`.
 If `System Volume Information` at a volume root cannot be read, output labels it `<path>: system only (not counted)`; its usage is included in the volume's used figure.
 
-Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. A path beginning with `/` or a file name beginning with `-` must be written as `\lists\servers.txt` or `.\-servers.txt`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets.
+Switches also accept `--` in place of `/`. JSON and CSV are mutually exclusive. Example: `dirused /file servers.list /summary /warn 80 /crit 95`. A path beginning with `/` or a file name beginning with `-` must be written as `\lists\servers.txt` or `.\-servers.txt`. Exit code 4 for a critical volume takes precedence over 3 for incomplete targets, except when a service start fails which returns exit 3.
 
 The top-3 folder walk obeys `/timeout` (60s per target when `/timeout` is not given) and never affects the exit code.
 

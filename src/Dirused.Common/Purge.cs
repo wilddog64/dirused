@@ -46,6 +46,7 @@ public sealed record PurgeRun(IReadOnlyList<ScanResult> Results, int WouldDelete
     public HeldFilesSummary? HeldSummary { get; init; }
     public int ProbeFailures { get; init; }
     public string? FirstProbeError { get; init; }
+    public bool ServiceStartFailed { get; init; }
 }
 public static class PurgeLog { public const string DefaultPath = @"C:\temp\dirused-purge.log"; }
 
@@ -53,6 +54,20 @@ public static class Purge
 {
     public static bool IsWouldDelete(string? status) =>
         status == "would delete" || (status != null && status.StartsWith("would delete after stopping ", StringComparison.Ordinal));
+
+    internal static bool PathContainsOrContained(string pathA, string pathB)
+    {
+        static string[] Parts(string s) => s.Replace('/', '\\').TrimEnd('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        var a = Parts(pathA);
+        var b = Parts(pathB);
+        if (a.Length == 0 || b.Length == 0) return false;
+        int min = Math.Min(a.Length, b.Length);
+        for (int i = 0; i < min; i++)
+        {
+            if (!a[i].Equals(b[i], StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
+    }
 
     public static bool IsStrictlyUnder(string path, string root)
     {
@@ -63,6 +78,19 @@ public static class Purge
         bool absolute = path.StartsWith('\\') || path.StartsWith('/') || (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] is '\\' or '/'));
         bool rootAbsolute = root.StartsWith('\\') || root.StartsWith('/') || (root.Length >= 3 && char.IsAsciiLetter(root[0]) && root[1] == ':' && (root[2] is '\\' or '/'));
         return absolute && rootAbsolute;
+    }
+
+    private sealed class HeldBackRow
+    {
+        public required LargestFile File { get; set; }
+        public required int ResultIndex { get; init; }
+        public required int FileIndex { get; init; }
+        public required string ScanRoot { get; init; }
+        public required string? TargetFinal { get; init; }
+        public required string Host { get; init; }
+        public required string ServiceKey { get; init; }
+        public required ServiceEntry MatchedService { get; init; }
+        public required bool IsRecent { get; init; }
     }
 
     public static PurgeRun Apply(
@@ -76,8 +104,19 @@ public static class Purge
         CancellationToken ct,
         string? purgeLogPath = null,
         IServiceQuery? services = null,
-        Func<string, bool>? isFixedDrive = null)
+        Func<string, bool>? isFixedDrive = null,
+        IServiceControl? control = null,
+        Func<DateTime>? localNow = null,
+        Action<TimeSpan>? sleep = null,
+        TextReader? input = null,
+        bool inputRedirected = false,
+        bool yes = false,
+        TextWriter? error = null)
     {
+        localNow ??= () => DateTime.Now;
+        sleep ??= t => Thread.Sleep(t);
+        input ??= Console.In;
+        error ??= Console.Error;
         DateTime cutoff = utcNow().AddDays(-days);
         purgeLogPath ??= PurgeLog.DefaultPath;
         int would = 0, deleted = 0, skipped = 0, failed = 0, notAttempted = 0;
@@ -95,10 +134,53 @@ public static class Purge
         string? heldInstallRoot = null;
         var serviceCache = new Dictionary<string, (IReadOnlyList<ServiceEntry>? List, string? Error)>(StringComparer.OrdinalIgnoreCase);
 
-        void RecordHeldClassification(LargestFile f, bool isConfirm, out string statusText)
+        if (services != null && control != null)
+        {
+            var warnedServices = new HashSet<(string Host, string Key)>();
+            foreach (var result in results)
+            {
+                string scanRoot = result.ScanRoot ?? result.Target;
+                if (ServiceQueryHelpers.TryMapHostAndLocalPath(scanRoot, isFixedDrive, out string? host, out string? localPath) && host != null && localPath != null)
+                {
+                    if (!serviceCache.TryGetValue(host, out var cached))
+                    {
+                        var list = services.ListProcrun(host, out var svcErr);
+                        cached = (list, svcErr);
+                        serviceCache[host] = cached;
+                    }
+                    if (cached.List != null)
+                    {
+                        foreach (var s in cached.List)
+                        {
+                            if (!s.Running && PathContainsOrContained(s.InstallRoot, localPath))
+                            {
+                                if (warnedServices.Add((host, s.Key)))
+                                {
+                                    if (host == ".")
+                                    {
+                                        error.WriteLine($"warning: {s.Key} is not running; start it with: sc start {s.Key}");
+                                    }
+                                    else
+                                    {
+                                        error.WriteLine($"warning: {s.Key} on {host} is not running; start it with: sc \\\\{host} start {s.Key}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        var heldBackRows = new List<HeldBackRow>();
+
+        void RecordHeldClassification(LargestFile f, bool isConfirm, out string? statusText) =>
+            RecordHeldClassificationWithDetails(f, isConfirm, out statusText, out _);
+
+        void RecordHeldClassificationWithDetails(LargestFile f, bool isConfirm, out string? statusText, out (string Reason, ServiceEntry? Service, string? Host, string? InstallRoot) classification)
         {
             heldTotal++;
-            var classification = ServiceQueryHelpers.ClassifyHeldFile(f, fs, services, isFixedDrive, serviceCache);
+            classification = ServiceQueryHelpers.ClassifyHeldFile(f, fs, services, isFixedDrive, serviceCache);
             if (classification.Reason == "tomcat")
             {
                 heldTomcatCount++;
@@ -150,14 +232,30 @@ public static class Purge
                         bool? probed = fs.ProbeHeld(file.Path, out _);
                         if (probed == true)
                         {
-                            RecordHeldClassification(file, confirm, out status);
+                            RecordHeldClassificationWithDetails(file, confirm, out status, out var classification);
                             if (IsWouldDelete(status))
                             {
                                 would++;
                                 wouldBytes += file.LogicalBytes;
                                 targetBytes += file.LogicalBytes;
                             }
-                            else if (confirm && status.StartsWith("failed: in use by ", StringComparison.Ordinal))
+                            else if (confirm && control != null && classification.Reason == "tomcat")
+                            {
+                                heldBackRows.Add(new HeldBackRow
+                                {
+                                    File = file,
+                                    ResultIndex = output.Count,
+                                    FileIndex = files.Count,
+                                    ScanRoot = scanRoot,
+                                    TargetFinal = targetFinal,
+                                    Host = classification.Host!,
+                                    ServiceKey = classification.Service!.Key,
+                                    MatchedService = classification.Service!,
+                                    IsRecent = true
+                                });
+                                status = null;
+                            }
+                            else if (confirm && status != null && status.StartsWith("failed: in use by ", StringComparison.Ordinal))
                             {
                                 try { log?.Invoke(LogLine(utcNow(), file.Path, file.LogicalBytes, status)); }
                                 catch { stopReason = "log write failed"; }
@@ -314,16 +412,492 @@ public static class Purge
                 }
                 else
                 {
-                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot);
-                    if (status == "deleted") { deleted++; deletedBytes += freed; targetBytes += freed; }
+                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot, confirm && control != null, out var heldBack);
+                    if (status == null && heldBack.HasValue)
+                    {
+                        heldBackRows.Add(new HeldBackRow
+                        {
+                            File = file,
+                            ResultIndex = output.Count,
+                            FileIndex = files.Count,
+                            ScanRoot = scanRoot,
+                            TargetFinal = targetFinal,
+                            Host = heldBack.Value.Host,
+                            ServiceKey = heldBack.Value.Service.Key,
+                            MatchedService = heldBack.Value.Service,
+                            IsRecent = false
+                        });
+                    }
+                    else if (status == "deleted") { deleted++; deletedBytes += freed; targetBytes += freed; }
                 }
 
-                if (status.StartsWith("skipped:", StringComparison.Ordinal)) skipped++;
-                if (status.StartsWith("failed:", StringComparison.Ordinal)) failed++;
-                if (status.StartsWith("not attempted:", StringComparison.Ordinal)) notAttempted++;
+                if (status != null)
+                {
+                    if (status.StartsWith("skipped:", StringComparison.Ordinal)) skipped++;
+                    if (status.StartsWith("failed:", StringComparison.Ordinal)) failed++;
+                    if (status.StartsWith("not attempted:", StringComparison.Ordinal)) notAttempted++;
+                }
                 files.Add(file with { PurgeStatus = status });
             }
             output.Add(result with { Largest = result.Largest with { Files = files, PurgeBytes = targetBytes, PurgeDryRun = !confirm } });
+        }
+
+        void AssignStatus(HeldBackRow row, string status, long freedBytes = 0)
+        {
+            var scanRes = output[row.ResultIndex];
+            var largest = scanRes.Largest!;
+            var fileList = largest.Files.ToList();
+            fileList[row.FileIndex] = fileList[row.FileIndex] with { PurgeStatus = status };
+            long purgeBytes = (largest.PurgeBytes ?? 0) + freedBytes;
+            output[row.ResultIndex] = scanRes with { Largest = largest with { Files = fileList, PurgeBytes = purgeBytes } };
+        }
+
+        bool serviceStartFailed = false;
+        var groups = new List<(string Host, string ServiceKey, List<HeldBackRow> Rows)>();
+        foreach (var row in heldBackRows)
+        {
+            int idx = groups.FindIndex(g => g.Host.Equals(row.Host, StringComparison.OrdinalIgnoreCase) && g.ServiceKey.Equals(row.ServiceKey, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+            {
+                groups[idx].Rows.Add(row);
+            }
+            else
+            {
+                groups.Add((row.Host, row.ServiceKey, new List<HeldBackRow> { row }));
+            }
+        }
+
+        foreach (var group in groups)
+        {
+            if (stopReason != null || ct.IsCancellationRequested)
+            {
+                stopReason ??= "cancelled";
+                string st = "not attempted: " + stopReason;
+                foreach (var row in group.Rows)
+                {
+                    AssignStatus(row, st);
+                    notAttempted++;
+                }
+                continue;
+            }
+            if (serviceStartFailed)
+            {
+                string st = "not attempted: earlier service start failed";
+                foreach (var row in group.Rows)
+                {
+                    AssignStatus(row, st);
+                    notAttempted++;
+                }
+                continue;
+            }
+
+            if (yes)
+            {
+                DateTime nowLocal = localNow();
+                TimeSpan tod = nowLocal.TimeOfDay;
+                bool inWindow = tod >= new TimeSpan(19, 0, 0) || tod < new TimeSpan(6, 0, 0);
+                if (!inWindow)
+                {
+                    string st = "skipped: in use, outside 19:00-06:00 for /yes";
+                    foreach (var row in group.Rows)
+                    {
+                        AssignStatus(row, st);
+                        skipped++;
+                    }
+                    continue;
+                }
+            }
+            else
+            {
+                long groupBytes = group.Rows.Sum(r => r.File.LogicalBytes);
+                foreach (var row in group.Rows)
+                {
+                    error.WriteLine($"{Dirused.Common.Renderers.Format.Short(row.File.LogicalBytes)}  {row.File.Path}");
+                }
+                error.Write($"Stop service {group.ServiceKey} on {group.Host} to delete {group.Rows.Count} held file(s), {Dirused.Common.Renderers.Format.Size(groupBytes)}? Tomcat is down until the deletes finish. [y/N] ");
+
+                if (inputRedirected)
+                {
+                    string st = "skipped: in use, not confirmed";
+                    foreach (var row in group.Rows)
+                    {
+                        AssignStatus(row, st);
+                        skipped++;
+                    }
+                    continue;
+                }
+
+                string? line = input?.ReadLine();
+                string trimmed = line?.Trim() ?? "";
+                if (!trimmed.Equals("y", StringComparison.OrdinalIgnoreCase) && !trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    string st = "skipped: in use, not confirmed";
+                    foreach (var row in group.Rows)
+                    {
+                        AssignStatus(row, st);
+                        skipped++;
+                    }
+                    continue;
+                }
+            }
+
+            var stayingRows = new List<HeldBackRow>();
+            foreach (var row in group.Rows)
+            {
+                bool? probed = fs.ProbeHeld(row.File.Path, out string? probeErr);
+                if (probed == false)
+                {
+                    if (row.IsRecent)
+                    {
+                        string st = $"skipped: modified within {days} day(s)";
+                        AssignStatus(row, st);
+                        skipped++;
+                    }
+                    else
+                    {
+                        string targetFinal = row.TargetFinal ?? row.ScanRoot;
+                        string st = ProcessFile(row.File, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot, false, out _)!;
+                        AssignStatus(row, st, freed);
+                        if (st == "deleted") { deleted++; deletedBytes += freed; }
+                        else if (st.StartsWith("skipped:", StringComparison.Ordinal)) skipped++;
+                        else if (st.StartsWith("failed:", StringComparison.Ordinal)) failed++;
+                        else if (st.StartsWith("not attempted:", StringComparison.Ordinal)) notAttempted++;
+                    }
+                    continue;
+                }
+
+                if (probed == null)
+                {
+                    string st = $"failed: in use ({probeErr ?? "unknown error"})";
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                    continue;
+                }
+
+                var reclass = ServiceQueryHelpers.ClassifyHeldFile(row.File, fs, services, isFixedDrive, serviceCache);
+                if (reclass.Reason != "tomcat")
+                {
+                    string st = $"failed: in use ({reclass.Reason})";
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                    continue;
+                }
+
+                stayingRows.Add(row);
+            }
+
+            if (stayingRows.Count == 0)
+            {
+                continue;
+            }
+
+            using var handle = control!.Open(group.Host, group.ServiceKey, out string? openErr);
+            if (handle == null)
+            {
+                string st = $"failed: could not stop {group.ServiceKey}: {openErr}";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                }
+                continue;
+            }
+
+            var dependents = handle.RunningDependents(out string? depErr);
+            if (dependents == null)
+            {
+                string st = $"failed: could not stop {group.ServiceKey}: {depErr}";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                }
+                continue;
+            }
+
+            if (dependents.Count > 0)
+            {
+                string st = $"failed: in use (service has running dependents: {string.Join(", ", dependents)})";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                }
+                continue;
+            }
+
+            var (initialState, _) = handle.QueryState();
+            if (initialState != ServiceState.Running)
+            {
+                string st = $"failed: in use ({group.ServiceKey} not running)";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, st);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                    catch { stopReason = "log write failed"; }
+                }
+                continue;
+            }
+
+            try
+            {
+                log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-stop"));
+            }
+            catch
+            {
+                stopReason = "log write failed";
+                string st = "failed: log write failed";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, st);
+                    failed++;
+                }
+                continue;
+            }
+
+            bool owned = false;
+            bool stopTimedOut = false;
+            var (stopOk, stopErr) = handle.Stop();
+            if (!stopOk)
+            {
+                if (stopErr is 1051 or 1062)
+                {
+                    string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                    foreach (var row in stayingRows)
+                    {
+                        AssignStatus(row, st);
+                        failed++;
+                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                        catch { stopReason = "log write failed"; }
+                    }
+                    continue;
+                }
+
+                var (postStopState, _) = handle.QueryState();
+                if (postStopState == ServiceState.Running)
+                {
+                    string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                    foreach (var row in stayingRows)
+                    {
+                        AssignStatus(row, st);
+                        failed++;
+                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                        catch { stopReason = "log write failed"; }
+                    }
+                    continue;
+                }
+
+                owned = true;
+                string stOwned = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                foreach (var row in stayingRows)
+                {
+                    AssignStatus(row, stOwned);
+                    failed++;
+                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stOwned)); }
+                    catch { stopReason = "log write failed"; }
+                }
+            }
+            else
+            {
+                owned = true;
+                DateTime pollStart = utcNow();
+                bool isStopped = false;
+                while ((utcNow() - pollStart).TotalSeconds < 120)
+                {
+                    var (s, _) = handle.QueryState();
+                    if (s == ServiceState.Stopped)
+                    {
+                        isStopped = true;
+                        break;
+                    }
+                    sleep(TimeSpan.FromSeconds(2));
+                }
+
+                if (!isStopped)
+                {
+                    stopTimedOut = true;
+                    string st = $"failed: could not stop {group.ServiceKey}: timed out";
+                    foreach (var row in stayingRows)
+                    {
+                        AssignStatus(row, st);
+                        failed++;
+                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                        catch { stopReason = "log write failed"; }
+                    }
+                }
+            }
+
+            try
+            {
+                if (owned && !stopTimedOut && stopOk)
+                {
+                    string rootLogs = group.Rows[0].MatchedService.InstallRoot.Replace('/', '\\').TrimEnd('\\') + @"\logs";
+                    for (int rIdx = 0; rIdx < stayingRows.Count; rIdx++)
+                    {
+                        var row = stayingRows[rIdx];
+                        if (ct.IsCancellationRequested)
+                        {
+                            for (int remIdx = rIdx; remIdx < stayingRows.Count; remIdx++)
+                            {
+                                AssignStatus(stayingRows[remIdx], "not attempted: cancelled");
+                                notAttempted++;
+                            }
+                            break;
+                        }
+
+                        string status;
+                        long freed = 0;
+                        try
+                        {
+                            status = DeleteHeldRow(row, fs, utcNow, log, sleep, rootLogs, group.ServiceKey, ref stopReason, out freed);
+                            if (status == "deleted")
+                            {
+                                deleted++;
+                                deletedBytes += freed;
+                            }
+                            else if (status.StartsWith("skipped:", StringComparison.Ordinal)) skipped++;
+                            else if (status.StartsWith("failed:", StringComparison.Ordinal)) failed++;
+                            else if (status.StartsWith("not attempted:", StringComparison.Ordinal)) notAttempted++;
+                        }
+                        catch (Exception ex)
+                        {
+                            status = "failed: " + ex.Message;
+                            failed++;
+                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, status)); }
+                            catch { stopReason = "log write failed"; }
+                        }
+                        AssignStatus(row, status, freed);
+                    }
+                }
+            }
+            finally
+            {
+                if (owned)
+                {
+                    bool verified = false;
+                    string failedReason = "start failed";
+                    ServiceState finalReportedState = ServiceState.Other;
+
+                    for (int attempt = 0; attempt < 2 && !verified; attempt++)
+                    {
+                        DateTime waitStopPendingStart = utcNow();
+                        while ((utcNow() - waitStopPendingStart).TotalSeconds < 300)
+                        {
+                            var (st, _) = handle.QueryState();
+                            if (st != ServiceState.StopPending) break;
+                            sleep(TimeSpan.FromSeconds(2));
+                        }
+
+                        var (startSuccess, sErr) = handle.Start();
+                        if (!startSuccess)
+                        {
+                            if (sErr == 1056)
+                            {
+                                var (s1056, _) = handle.QueryState();
+                                if (s1056 == ServiceState.StopPending)
+                                {
+                                    DateTime waitSecond = utcNow();
+                                    while ((utcNow() - waitSecond).TotalSeconds < 300)
+                                    {
+                                        var (stWait, _) = handle.QueryState();
+                                        if (stWait != ServiceState.StopPending) break;
+                                        sleep(TimeSpan.FromSeconds(2));
+                                    }
+                                    handle.Start();
+                                }
+                            }
+                            else
+                            {
+                                sleep(TimeSpan.FromSeconds(5));
+                                handle.Start();
+                            }
+                        }
+
+                        DateTime pollRunningStart = utcNow();
+                        bool reachedRunning = false;
+                        while ((utcNow() - pollRunningStart).TotalSeconds < 120)
+                        {
+                            var (st, _) = handle.QueryState();
+                            finalReportedState = st;
+                            if (st == ServiceState.Running)
+                            {
+                                reachedRunning = true;
+                                break;
+                            }
+                            sleep(TimeSpan.FromSeconds(2));
+                        }
+
+                        if (!reachedRunning)
+                        {
+                            failedReason = "timed out waiting for RUNNING";
+                            continue;
+                        }
+
+                        try
+                        {
+                            log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-start"));
+                        }
+                        catch (Exception ex)
+                        {
+                            try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
+                        }
+
+                        sleep(TimeSpan.FromSeconds(60));
+                        var (settledState, _) = handle.QueryState();
+                        finalReportedState = settledState;
+                        if (settledState == ServiceState.Running)
+                        {
+                            verified = true;
+                            try
+                            {
+                                log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, "service-started"));
+                            }
+                            catch (Exception ex)
+                            {
+                                try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
+                            }
+                            break;
+                        }
+                        else
+                        {
+                            failedReason = "stopped after settle";
+                        }
+                    }
+
+                    if (!verified)
+                    {
+                        serviceStartFailed = true;
+                        try
+                        {
+                            log?.Invoke(LogLine(utcNow(), $"{group.ServiceKey}@{group.Host}", 0, $"service-start-failed: {failedReason}"));
+                        }
+                        catch (Exception ex)
+                        {
+                            try { error.WriteLine($"error writing purge log: {ex.Message}"); } catch { }
+                        }
+
+                        if (group.Host == ".")
+                        {
+                            error.WriteLine($"error: {group.ServiceKey} did not start ({failedReason}, state {finalReportedState}). Start it with: sc start {group.ServiceKey}");
+                        }
+                        else
+                        {
+                            error.WriteLine($"error: {group.ServiceKey} on {group.Host} did not start ({failedReason}, state {finalReportedState}). Start it with: sc \\\\{group.Host} start {group.ServiceKey}");
+                        }
+                    }
+                }
+            }
         }
 
         HeldFilesSummary? heldSummary = heldTotal > 0
@@ -334,11 +908,12 @@ public static class Purge
         {
             HeldSummary = heldSummary,
             ProbeFailures = probeFailures,
-            FirstProbeError = firstProbeError
+            FirstProbeError = firstProbeError,
+            ServiceStartFailed = serviceStartFailed
         };
     }
 
-    private static string ProcessFile(
+    private static string? ProcessFile(
         LargestFile file,
         string targetFinal,
         IPurgeFileSystem fs,
@@ -355,11 +930,14 @@ public static class Purge
         ref int heldOtherCount,
         ref string? heldService,
         ref string? heldHost,
-        ref string? heldInstallRoot)
+        ref string? heldInstallRoot,
+        bool holdBackForStop,
+        out (string Host, ServiceEntry Service, string InstallRoot)? heldBack)
     {
+        heldBack = null;
         freed = 0;
         PurgeOpen? opened = null;
-        string status = "failed: unknown error";
+        string? status = "failed: unknown error";
         bool marked = false;
         bool deletionLineWritten = false;
         try
@@ -379,6 +957,12 @@ public static class Purge
                         heldService ??= classification.Service!.Key;
                         heldHost ??= classification.Host;
                         heldInstallRoot ??= classification.InstallRoot;
+                        if (holdBackForStop)
+                        {
+                            heldBack = (classification.Host!, classification.Service!, classification.InstallRoot!);
+                            opened.Dispose();
+                            return null;
+                        }
                         status = $"failed: in use by {classification.Service!.Key} (stop not available yet)";
                     }
                     else
@@ -447,12 +1031,114 @@ public static class Purge
             try { log?.Invoke(LogLine(utcNow(), file.Path, file.LogicalBytes, status)); }
             catch { stopReason = "log write failed"; }
         }
-        else if (status.StartsWith("failed:", StringComparison.Ordinal) && status != "failed: log write failed")
+        else if (status != null && status.StartsWith("failed:", StringComparison.Ordinal) && status != "failed: log write failed")
         {
             try { log?.Invoke(LogLine(utcNow(), file.Path, file.LogicalBytes, status)); }
             catch { stopReason = "log write failed"; }
         }
         return status;
+    }
+
+    private static string DeleteHeldRow(
+        HeldBackRow row,
+        IPurgeFileSystem fs,
+        Func<DateTime> utcNow,
+        Action<string>? log,
+        Action<TimeSpan> sleep,
+        string rootLogs,
+        string serviceKey,
+        ref string? stopReason,
+        out long freed)
+    {
+        freed = 0;
+        DateTime startOpen = utcNow();
+        PurgeOpen opened = fs.Open(row.File.Path);
+        while (opened.ErrorCode == 32 && (utcNow() - startOpen).TotalSeconds < 30)
+        {
+            opened.Dispose();
+            sleep(TimeSpan.FromSeconds(2));
+            opened = fs.Open(row.File.Path);
+        }
+
+        long handleLength = 0;
+        try
+        {
+            if (opened.ErrorCode == 32)
+            {
+                string st = $"failed: in use after stopping {serviceKey}";
+                try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                catch { stopReason = "log write failed"; }
+                return st;
+            }
+            if (opened.NotFound)
+            {
+                return "skipped: no longer exists";
+            }
+            if (opened.Info == null)
+            {
+                string st = "failed: " + (opened.Error ?? "unknown error");
+                try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                catch { stopReason = "log write failed"; }
+                return st;
+            }
+
+            var info = opened.Info;
+            handleLength = info.Length;
+            if (info.VolumeSerial == null || info.FileIndex == null ||
+                info.VolumeSerial != row.File.VolumeSerial || info.FileIndex != row.File.FileId)
+            {
+                return row.File.FromList ? "skipped: file changed since list (id)" : "skipped: changed since scan (id)";
+            }
+
+            if (info.Length < row.File.LogicalBytes)
+            {
+                return row.File.FromList ? "skipped: file changed since list (smaller)" : "skipped: changed since scan (smaller)";
+            }
+
+            string cleanFinal = info.FinalPath.StartsWith(@"\\?\", StringComparison.Ordinal) && !info.FinalPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
+                ? info.FinalPath.Substring(4)
+                : info.FinalPath;
+            bool mapped = ServiceQueryHelpers.TryMapHostAndLocalPath(cleanFinal, null, out _, out string? localFinal);
+            string pathForDir = (mapped && localFinal != null) ? localFinal : cleanFinal;
+            string finalDir = (WindowsPath.GetDirectoryName(pathForDir.Replace('/', '\\')) ?? "").TrimEnd('\\');
+            if (!finalDir.Equals(rootLogs, StringComparison.OrdinalIgnoreCase) || !ServiceQueryHelpers.IsRedirectLogName(info.FinalPath))
+            {
+                return "skipped: changed since scan (name)";
+            }
+
+            if (info.IsDirectory || info.IsReparsePoint) return "skipped: not a regular file";
+            if (info.LinkCount != 1) return "skipped: hard-linked";
+            string targetFinal = row.TargetFinal ?? row.ScanRoot;
+            if (!IsStrictlyUnder(info.FinalPath, targetFinal)) return "skipped: outside target";
+            if (info.IsReadOnly) return "skipped: read-only";
+
+            opened.MarkDelete();
+            try
+            {
+                log?.Invoke(LogLine(utcNow(), row.File.Path, info.Length, "deleted"));
+            }
+            catch
+            {
+                try { opened.UnmarkDelete(); } catch { }
+                stopReason = "log write failed";
+                return "failed: log write failed";
+            }
+        }
+        finally
+        {
+            opened.Dispose();
+        }
+
+        using var verification = fs.Open(row.File.Path);
+        if (verification.NotFound)
+        {
+            freed = handleLength;
+            return "deleted";
+        }
+        string pending = "failed: delete pending (another process has the file open)";
+        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, pending)); }
+        catch { stopReason = "log write failed"; }
+        return pending;
     }
 
     private static bool HasUnsafeName(string path) => path.Replace('/', '\\').Split('\\').Any(s => s.EndsWith('.') || s.EndsWith(' '));
