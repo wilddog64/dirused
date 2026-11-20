@@ -541,6 +541,7 @@ public static class Purge
                 }
             }
 
+            var revalidateCache = new Dictionary<string, (IReadOnlyList<ServiceEntry>? List, string? Error)>(StringComparer.OrdinalIgnoreCase);
             var stayingRows = new List<HeldBackRow>();
             foreach (var row in group.Rows)
             {
@@ -576,10 +577,11 @@ public static class Purge
                     continue;
                 }
 
-                var reclass = ServiceQueryHelpers.ClassifyHeldFile(row.File, fs, services, isFixedDrive, serviceCache);
-                if (reclass.Reason != "tomcat")
+                var reclass = ServiceQueryHelpers.ClassifyHeldFile(row.File, fs, services, isFixedDrive, revalidateCache);
+                if (reclass.Reason != "tomcat" || reclass.Service?.Key != group.ServiceKey)
                 {
-                    string st = $"failed: in use ({reclass.Reason})";
+                    string reason = reclass.Reason != "tomcat" ? reclass.Reason : "held by a different service";
+                    string st = $"failed: in use ({reason})";
                     AssignStatus(row, st);
                     failed++;
                     try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
@@ -668,78 +670,97 @@ public static class Purge
 
             bool owned = false;
             bool stopTimedOut = false;
-            var (stopOk, stopErr) = handle.Stop();
-            if (!stopOk)
-            {
-                if (stopErr is 1051 or 1062)
-                {
-                    string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
-                    foreach (var row in stayingRows)
-                    {
-                        AssignStatus(row, st);
-                        failed++;
-                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                        catch { stopReason = "log write failed"; }
-                    }
-                    continue;
-                }
-
-                var (postStopState, _) = handle.QueryState();
-                if (postStopState == ServiceState.Running)
-                {
-                    string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
-                    foreach (var row in stayingRows)
-                    {
-                        AssignStatus(row, st);
-                        failed++;
-                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                        catch { stopReason = "log write failed"; }
-                    }
-                    continue;
-                }
-
-                owned = true;
-                string stOwned = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
-                foreach (var row in stayingRows)
-                {
-                    AssignStatus(row, stOwned);
-                    failed++;
-                    try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stOwned)); }
-                    catch { stopReason = "log write failed"; }
-                }
-            }
-            else
-            {
-                owned = true;
-                DateTime pollStart = utcNow();
-                bool isStopped = false;
-                while ((utcNow() - pollStart).TotalSeconds < 120)
-                {
-                    var (s, _) = handle.QueryState();
-                    if (s == ServiceState.Stopped)
-                    {
-                        isStopped = true;
-                        break;
-                    }
-                    sleep(TimeSpan.FromSeconds(2));
-                }
-
-                if (!isStopped)
-                {
-                    stopTimedOut = true;
-                    string st = $"failed: could not stop {group.ServiceKey}: timed out";
-                    foreach (var row in stayingRows)
-                    {
-                        AssignStatus(row, st);
-                        failed++;
-                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
-                        catch { stopReason = "log write failed"; }
-                    }
-                }
-            }
-
+            bool stopOk = false;
             try
             {
+                int stopErr = 0;
+                try
+                {
+                    (stopOk, stopErr) = handle.Stop();
+                }
+                catch
+                {
+                    try
+                    {
+                        var (postStopState, _) = handle.QueryState();
+                        if (postStopState != ServiceState.Running)
+                        {
+                            owned = true;
+                        }
+                    }
+                    catch { }
+                    throw;
+                }
+
+                if (!stopOk)
+                {
+                    if (stopErr is 1051 or 1062)
+                    {
+                        string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                        foreach (var row in stayingRows)
+                        {
+                            AssignStatus(row, st);
+                            failed++;
+                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                            catch { stopReason = "log write failed"; }
+                        }
+                        continue;
+                    }
+
+                    var (postStopState, _) = handle.QueryState();
+                    if (postStopState == ServiceState.Running)
+                    {
+                        string st = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                        foreach (var row in stayingRows)
+                        {
+                            AssignStatus(row, st);
+                            failed++;
+                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                            catch { stopReason = "log write failed"; }
+                        }
+                        continue;
+                    }
+
+                    owned = true;
+                    string stOwned = $"failed: could not stop {group.ServiceKey}: {new Win32Exception(stopErr).Message}";
+                    foreach (var row in stayingRows)
+                    {
+                        AssignStatus(row, stOwned);
+                        failed++;
+                        try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, stOwned)); }
+                        catch { stopReason = "log write failed"; }
+                    }
+                }
+                else
+                {
+                    owned = true;
+                    DateTime pollStart = utcNow();
+                    bool isStopped = false;
+                    while ((utcNow() - pollStart).TotalSeconds < 120)
+                    {
+                        var (s, _) = handle.QueryState();
+                        if (s == ServiceState.Stopped)
+                        {
+                            isStopped = true;
+                            break;
+                        }
+                        sleep(TimeSpan.FromSeconds(2));
+                    }
+
+                    if (!isStopped)
+                    {
+                        stopTimedOut = true;
+                        string st = $"failed: could not stop {group.ServiceKey}: timed out";
+                        foreach (var row in stayingRows)
+                        {
+                            AssignStatus(row, st);
+                            failed++;
+                            try { log?.Invoke(LogLine(utcNow(), row.File.Path, row.File.LogicalBytes, st)); }
+                            catch { stopReason = "log write failed"; }
+                        }
+                    }
+                }
+
                 if (owned && !stopTimedOut && stopOk)
                 {
                     string rootLogs = group.Rows[0].MatchedService.InstallRoot.Replace('/', '\\').TrimEnd('\\') + @"\logs";

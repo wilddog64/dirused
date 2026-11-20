@@ -121,8 +121,8 @@ public sealed class PurgeServiceTests
         var services = new FakeServices();
         services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
 
-        // Test answers that reject: redirected input without /yes, "n", "no", "ye", "other", empty
-        foreach (var (inputStr, redirected) in new[] { ("", true), ("n\n", false), ("no\n", false), ("ye\n", false), ("foo\n", false), ("\n", false) })
+        // Test answers that reject: redirected input without /yes, "n", "no", "ye", "other", empty, and redirected input containing "y" or "yes"
+        foreach (var (inputStr, redirected) in new[] { ("", true), ("y\n", true), ("yes\n", true), ("n\n", false), ("no\n", false), ("ye\n", false), ("foo\n", false), ("\n", false) })
         {
             var fs = new FakeFs();
             fs.HeldProbes[p] = true;
@@ -348,6 +348,183 @@ public sealed class PurgeServiceTests
     }
 
     [Fact]
+    public void M4_QueryStateThrowsDuringStopPoll_StartStillCalled_ExceptionSurfaces()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        int queryCallsAfterStop = 0;
+        FakeServiceHandle handle = null!;
+        handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            CustomQuery = () =>
+            {
+                if (handle.StopCalls > 0)
+                {
+                    queryCallsAfterStop++;
+                    if (queryCallsAfterStop == 1)
+                    {
+                        // Stop poll is the first query call after Stop
+                        throw new InvalidOperationException("QueryState exploded during stop poll");
+                    }
+                }
+                return (ServiceState.Running, null);
+            }
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        Assert.Throws<InvalidOperationException>(() =>
+            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                sleep: ts => fakeTime += ts, yes: true));
+
+        Assert.Equal(1, handle.StopCalls);
+        Assert.True(handle.StartCalls >= 1);
+    }
+
+    [Fact]
+    public void M4_SleepThrowsDuringStopPoll_StartStillCalled_ExceptionSurfaces()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        FakeServiceHandle handle = null!;
+        handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.StopPending, // keep StopPending so poll tries to sleep
+            StateAfterStart = ServiceState.Running
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        int sleepCallsAfterStop = 0;
+        DateTime fakeTime = Now;
+        Assert.Throws<InvalidOperationException>(() =>
+            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                sleep: ts =>
+                {
+                    fakeTime += ts;
+                    if (handle.StopCalls > 0)
+                    {
+                        sleepCallsAfterStop++;
+                        if (sleepCallsAfterStop == 1)
+                        {
+                            throw new InvalidOperationException("sleep exploded during stop poll");
+                        }
+                    }
+                },
+                yes: true));
+
+        Assert.Equal(1, handle.StopCalls);
+        Assert.True(handle.StartCalls >= 1);
+    }
+
+    [Fact]
+    public void StopThrows_QueryStateStopped_OwnedTrue_StartCalledOnce_ExceptionSurfaces()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        var handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            OnStop = () => throw new InvalidOperationException("Stop crashed")
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                sleep: ts => fakeTime += ts, yes: true));
+
+        Assert.Equal("Stop crashed", ex.Message);
+        Assert.Equal(1, handle.StopCalls);
+        Assert.Equal(1, handle.StartCalls);
+    }
+
+    [Fact]
+    public void StopThrows_QueryStateRunning_OwnedFalse_StartNeverCalled()
+    {
+        string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+        };
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p] = true;
+        fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        var handle = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Running,
+            StateAfterStart = ServiceState.Running,
+            OnStop = () => throw new InvalidOperationException("Stop crashed")
+        };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+                services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                sleep: ts => fakeTime += ts, yes: true));
+
+        Assert.Equal("Stop crashed", ex.Message);
+        Assert.Equal(1, handle.StopCalls);
+        Assert.Equal(0, handle.StartCalls);
+    }
+
+    [Fact]
     public void M5_AfterStopTimeout_FakeStaysStopPending_StartReturns1056_ThenFakeGoesStopped_DirusedWaitsAndCallsStartAgain()
     {
         string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
@@ -365,46 +542,101 @@ public sealed class PurgeServiceTests
         fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
 
         int startCount = 0;
-        int queryCount = 0;
+        int stopPendingSleep2Count = 0;
         ServiceState currentState = ServiceState.Running;
+        var operations = new List<string>();
+        var sleepDurations = new List<int>();
 
         var handle = new FakeServiceHandle();
         handle.OnStop = () => { currentState = ServiceState.StopPending; }; // stays StopPending during Stop poll
         handle.CustomStart = () =>
         {
             startCount++;
+            operations.Add($"Start-{startCount}");
             if (startCount == 1)
             {
-                // First Start call returns 1056 (already running) while state is StopPending
+                // First Start returns 1056 and state is StopPending
+                currentState = ServiceState.StopPending;
                 return (false, 1056);
             }
-            // Second Start call reaches RUNNING
+            if (currentState == ServiceState.StopPending)
+            {
+                // If Start is called while still StopPending (e.g. from else branch), it fails with 1056
+                return (false, 1056);
+            }
+            // Start when Stopped reaches Running
             currentState = ServiceState.Running;
             return (true, 0);
         };
         handle.CustomQuery = () =>
         {
-            queryCount++;
-            if (startCount == 1 && currentState == ServiceState.StopPending && queryCount >= 65)
-            {
-                // Fake transitions from StopPending to Stopped while waiting
-                currentState = ServiceState.Stopped;
-            }
+            operations.Add($"QueryState-{currentState}");
             return (currentState, null);
         };
 
         var control = new FakeServiceControl();
         control.Services[("h", "tomcat85")] = handle;
 
+        var logLines = new List<string>();
         DateTime fakeTime = Now;
         var run = Purge.Apply(
-            new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            new[] { r }, 1, 1024, true, fs, () => fakeTime, l => logLines.Add(l), CancellationToken.None,
             services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-            sleep: ts => fakeTime += ts, yes: true);
+            sleep: ts =>
+            {
+                int sec = (int)ts.TotalSeconds;
+                sleepDurations.Add(sec);
+                operations.Add($"Sleep-{sec}");
+                fakeTime += ts;
+
+                // Stop poll times out after 120s: transition to Stopped so line 828 does not loop
+                if (startCount == 0 && (fakeTime - Now).TotalSeconds >= 120)
+                {
+                    currentState = ServiceState.Stopped;
+                }
+
+                // In 1056 wait: only 2-second sleep(s) inside the 1056 loop transition it to Stopped!
+                // If a 5-second sleep runs (from the non-1056 else branch), state remains StopPending!
+                if (startCount == 1 && currentState == ServiceState.StopPending && sec == 2)
+                {
+                    stopPendingSleep2Count++;
+                    if (stopPendingSleep2Count >= 1)
+                    {
+                        currentState = ServiceState.Stopped;
+                    }
+                }
+            },
+            yes: true);
 
         Assert.Equal("failed: could not stop tomcat85: timed out", run.Results[0].Largest!.Files[0].PurgeStatus);
-        Assert.Equal(2, startCount);
         Assert.False(run.ServiceStartFailed);
+
+        // Assert 1056 path behavior exactly:
+        // 1. Exactly 2 Start calls (no outer retry 3rd start)
+        Assert.Equal(2, handle.StartCalls);
+        Assert.Equal(2, startCount);
+
+        // 2. No 5-second sleep from the non-1056 else branch
+        Assert.DoesNotContain(5, sleepDurations);
+
+        // 3. Exactly one 60-second settle sleep
+        Assert.Single(sleepDurations, d => d == 60);
+
+        // 4. Verify exact sequence: Start-1 -> Sleep-2 -> Start-2 -> Sleep-60
+        int idxStart1 = operations.IndexOf("Start-1");
+        int idxSleep2 = operations.FindIndex(idxStart1, op => op == "Sleep-2");
+        int idxStart2 = operations.IndexOf("Start-2");
+        int idxSleep60 = operations.IndexOf("Sleep-60");
+
+        Assert.True(idxStart1 >= 0);
+        Assert.True(idxSleep2 > idxStart1, "Sleep-2 must follow Start-1");
+        Assert.True(idxStart2 > idxSleep2, "Start-2 must happen after StopPending 2s wait");
+        Assert.True(idxSleep60 > idxStart2, "Sleep-60 must happen after Start-2 succeeds");
+
+        // 5. Audit logs show service-start and service-started, and NO service-start-failed
+        Assert.Contains(logLines, l => l.Contains("service-start"));
+        Assert.Contains(logLines, l => l.Contains("service-started"));
+        Assert.DoesNotContain(logLines, l => l.Contains("service-start-failed"));
     }
 
     [Fact]
@@ -785,6 +1017,61 @@ public sealed class PurgeServiceTests
             Assert.Equal(1, handle.StopCalls);
             Assert.Equal(0, handle.StartCalls); // NOT owned -> no Start!
         }
+
+        // 5. RunningDependents returns null with an error (x06)
+        {
+            var fs = new FakeFs();
+            fs.HeldProbes[p] = true;
+            fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+            var handle = new FakeServiceHandle
+            {
+                InitialState = ServiceState.Running,
+                DependentsError = "access denied querying dependents"
+            };
+            var control = new FakeServiceControl();
+            control.Services[("h", "tomcat85")] = handle;
+
+            DateTime fakeTime = Now;
+            var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+            Assert.Equal("failed: could not stop tomcat85: access denied querying dependents", run.Results[0].Largest!.Files[0].PurgeStatus);
+            Assert.Equal(0, handle.StopCalls);
+            Assert.Equal(0, handle.StartCalls);
+        }
+
+        // 6. Initial state is not Running (x07)
+        {
+            var fs = new FakeFs();
+            fs.HeldProbes[p] = true;
+            fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+            var handle = new FakeServiceHandle
+            {
+                InitialState = ServiceState.Stopped
+            };
+            var control = new FakeServiceControl();
+            control.Services[("h", "tomcat85")] = handle;
+
+            DateTime fakeTime = Now;
+            var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+            Assert.Equal("failed: in use (tomcat85 not running)", run.Results[0].Largest!.Files[0].PurgeStatus);
+            Assert.Equal(0, handle.StopCalls);
+            Assert.Equal(0, handle.StartCalls);
+        }
+
+        // 7. Handle open failure (N3 Open failure)
+        {
+            var fs = new FakeFs();
+            fs.HeldProbes[p] = true;
+            fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+            var handle = new FakeServiceHandle { InitialState = ServiceState.Running };
+            var control = new FakeServiceControl { OpenError = "failed to open service handle" };
+            control.Services[("h", "tomcat85")] = handle;
+
+            DateTime fakeTime = Now;
+            var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+            Assert.Equal("failed: could not stop tomcat85: failed to open service handle", run.Results[0].Largest!.Files[0].PurgeStatus);
+            Assert.Equal(0, handle.StopCalls);
+            Assert.Equal(0, handle.StartCalls);
+        }
     }
 
     [Fact]
@@ -852,6 +1139,366 @@ public sealed class PurgeServiceTests
         Assert.Equal(0, handle2.StartCalls);
     }
 
+    [Fact]
+    public void N5_TwoGroupsBothSucceed_TwoStopsTwoStarts_AllRowsDeleted()
+    {
+        string p1 = @"\\h1\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        string p2 = @"\\h2\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+
+        var f1 = new LargestFile(p1, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var f2 = new LargestFile(p2, 100_000_000, Now) { VolumeSerial = 2, FileId = 2 };
+
+        var r1 = new ScanResult(@"\\h1\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h1\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f1.LogicalBytes, new List<LargestFile> { f1 }, true)
+        };
+        var r2 = new ScanResult(@"\\h2\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h2\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f2.LogicalBytes, new List<LargestFile> { f2 }, true)
+        };
+
+        var services = new FakeServices();
+        services.Hosts["h1"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+        services.Hosts["h2"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p1] = true;
+        fs.HeldProbes[p2] = true;
+        fs.Stats[p1] = new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.Stats[p2] = new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+        fs.OpenAfterStop[p1] = () => new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.OpenAfterStop[p2] = () => new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+
+        var handle1 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running
+        };
+        var handle2 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running
+        };
+
+        var control = new FakeServiceControl();
+        control.Services[("h1", "tomcat85")] = handle1;
+        control.Services[("h2", "tomcat85")] = handle2;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(
+            new[] { r1, r2 }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+            sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal("deleted", run.Results[1].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(2, run.Deleted);
+        Assert.False(run.ServiceStartFailed);
+
+        Assert.Equal(1, handle1.StopCalls);
+        Assert.Equal(1, handle1.StartCalls);
+        Assert.Equal(1, handle2.StopCalls);
+        Assert.Equal(1, handle2.StartCalls);
+    }
+
+    [Fact]
+    public void M7_RevalidationRechecksTomcatRedirectLog_DifferentServiceOrNonRedirect_FailedInUse_ZeroStop()
+    {
+        // Case 1: Different service key at revalidation
+        {
+            string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+            var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+            var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+            {
+                ScanRoot = @"\\h\d$\Tomcat",
+                Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+            };
+
+            var services = new FakeServices();
+            services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+            var fs = new FakeFs();
+            fs.HeldProbes[p] = true;
+            fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+            fs.OnProbeHeld = _ =>
+            {
+                services.Hosts["h"] = new[] { new ServiceEntry("tomcat85_new", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+            };
+
+            var handle = new FakeServiceHandle { InitialState = ServiceState.Running, StateAfterStop = ServiceState.Stopped, StateAfterStart = ServiceState.Running };
+            var control = new FakeServiceControl();
+            control.Services[("h", "tomcat85")] = handle;
+            control.Services[("h", "tomcat90")] = handle;
+
+            DateTime fakeTime = Now;
+            var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+
+            Assert.Equal("failed: in use (held by a different service)", run.Results[0].Largest!.Files[0].PurgeStatus);
+            Assert.Equal(0, handle.StopCalls);
+            Assert.Equal(0, run.Deleted);
+            Assert.Equal(1, run.Failed);
+        }
+
+        // Case 2: Non-redirect name at revalidation
+        {
+            string p = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+            var f = new LargestFile(p, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+            var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+            {
+                ScanRoot = @"\\h\d$\Tomcat",
+                Largest = new LargestFiles(new[] { "*.log" }, 1, f.LogicalBytes, new List<LargestFile> { f }, true)
+            };
+
+            var services = new FakeServices();
+            services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+            var fs = new FakeFs();
+            fs.HeldProbes[p] = true;
+            fs.Stats[p] = new PurgeFileInfo(p, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+            fs.OnProbeHeld = _ =>
+            {
+                services.Hosts["h"] = Array.Empty<ServiceEntry>();
+            };
+
+            var handle = new FakeServiceHandle { InitialState = ServiceState.Running, StateAfterStop = ServiceState.Stopped, StateAfterStart = ServiceState.Running };
+            var control = new FakeServiceControl();
+            control.Services[("h", "tomcat85")] = handle;
+
+            DateTime fakeTime = Now;
+            var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+
+            Assert.Equal("failed: in use (no service found)", run.Results[0].Largest!.Files[0].PurgeStatus);
+            Assert.Equal(0, handle.StopCalls);
+            Assert.Equal(0, run.Deleted);
+            Assert.Equal(1, run.Failed);
+        }
+    }
+
+    [Fact]
+    public void M14_TwoGroupsClockMovesPast0600_Group1Stops_Group2SkippedOutsideWindow()
+    {
+        string p1 = @"\\h1\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        string p2 = @"\\h2\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+
+        var f1 = new LargestFile(p1, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var f2 = new LargestFile(p2, 100_000_000, Now) { VolumeSerial = 2, FileId = 2 };
+
+        var r1 = new ScanResult(@"\\h1\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h1\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f1.LogicalBytes, new List<LargestFile> { f1 }, true)
+        };
+        var r2 = new ScanResult(@"\\h2\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h2\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f2.LogicalBytes, new List<LargestFile> { f2 }, true)
+        };
+
+        var services = new FakeServices();
+        services.Hosts["h1"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+        services.Hosts["h2"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p1] = true;
+        fs.HeldProbes[p2] = true;
+        fs.Stats[p1] = new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.Stats[p2] = new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+        fs.OpenAfterStop[p1] = () => new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        DateTime localClock = new DateTime(2026, 11, 20, 5, 58, 0);
+
+        var handle1 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            OnStop = () =>
+            {
+                // Move clock from 05:58 to 06:01 before group 2's Stop
+                localClock = new DateTime(2026, 11, 20, 6, 1, 0);
+            }
+        };
+        var handle2 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running
+        };
+
+        var control = new FakeServiceControl();
+        control.Services[("h1", "tomcat85")] = handle1;
+        control.Services[("h2", "tomcat85")] = handle2;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(
+            new[] { r1, r2 }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None,
+            services: services, control: control, localNow: () => localClock,
+            sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal("skipped: in use, outside 19:00-06:00 for /yes", run.Results[1].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, handle1.StopCalls);
+        Assert.Equal(1, handle1.StartCalls);
+        Assert.Equal(0, handle2.StopCalls);
+        Assert.Equal(0, handle2.StartCalls);
+    }
+
+    [Fact]
+    public void M16b_NextRunWarning_WarnsWhenTargetEqualsOrUnderInstallRoot()
+    {
+        // 1. Target equals install root
+        {
+            var r = new ScanResult(@"\\us03p02ffm01\d$\Tomcat\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+            {
+                ScanRoot = @"\\us03p02ffm01\d$\Tomcat\Tomcat",
+                Largest = new LargestFiles(Array.Empty<string>(), 0, 0, new List<LargestFile>(), true)
+            };
+            var services = new FakeServices();
+            services.Hosts["us03p02ffm01"] = new[]
+            {
+                new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", false)
+            };
+            var control = new FakeServiceControl();
+            using var err = new StringWriter();
+            Purge.Apply(new[] { r }, 1, 1024, false, new FakeFs(), () => Now, null, CancellationToken.None, services: services, control: control, error: err);
+            Assert.Contains(@"warning: tomcat85 on us03p02ffm01 is not running; start it with: sc \\us03p02ffm01 start tomcat85", err.ToString());
+        }
+
+        // 2. Target is under install root
+        {
+            var r = new ScanResult(@"\\us03p02ffm01\d$\Tomcat\Tomcat\logs", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+            {
+                ScanRoot = @"\\us03p02ffm01\d$\Tomcat\Tomcat\logs",
+                Largest = new LargestFiles(Array.Empty<string>(), 0, 0, new List<LargestFile>(), true)
+            };
+            var services = new FakeServices();
+            services.Hosts["us03p02ffm01"] = new[]
+            {
+                new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", false)
+            };
+            var control = new FakeServiceControl();
+            using var err = new StringWriter();
+            Purge.Apply(new[] { r }, 1, 1024, false, new FakeFs(), () => Now, null, CancellationToken.None, services: services, control: control, error: err);
+            Assert.Contains(@"warning: tomcat85 on us03p02ffm01 is not running; start it with: sc \\us03p02ffm01 start tomcat85", err.ToString());
+        }
+    }
+
+    [Fact]
+    public void X01_N1_FileHeldByNonTomcatProcessWithRedirectLogName_NotHeldBackForStop_ZeroStopForIt()
+    {
+        string pNonTomcat = @"\\h\d$\Tomcat\Tomcat\logs\otherapp-stderr.2026-11-04.log";
+        string pTomcat = @"\\h\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+
+        // Old file (LastWriteUtc < cutoff) held by non-tomcat process with redirect-log naming pattern
+        var f1 = new LargestFile(pNonTomcat, 50_000_000, Old) { VolumeSerial = 1, FileId = 1 };
+        var f2 = new LargestFile(pTomcat, 50_000_000, Now) { VolumeSerial = 2, FileId = 2 };
+
+        var r = new ScanResult(@"\\h\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 2, 100_000_000, new List<LargestFile> { f1, f2 }, true)
+        };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[pNonTomcat] = true;
+        fs.HeldProbes[pTomcat] = true;
+
+        fs.OpenCallbacks[pNonTomcat] = new Queue<Func<PurgeOpen>>(new Func<PurgeOpen>[]
+        {
+            () => new PurgeOpen("sharing violation", notFound: false, errorCode: 32)
+        });
+        fs.Stats[pNonTomcat] = new PurgeFileInfo(pNonTomcat, 50_000_000, Old, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        fs.Stats[pTomcat] = new PurgeFileInfo(pTomcat, 50_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+        fs.OpenAfterStop[pTomcat] = () => new PurgeFileInfo(pTomcat, 50_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+
+        var services = new FakeServices();
+        services.Hosts["h"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var handle = new FakeServiceHandle { InitialState = ServiceState.Running, StateAfterStop = ServiceState.Stopped, StateAfterStart = ServiceState.Running };
+        var control = new FakeServiceControl();
+        control.Services[("h", "tomcat85")] = handle;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(new[] { r }, 1, 1024, true, fs, () => fakeTime, null, CancellationToken.None, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("failed: in use (not a Tomcat log)", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[1].PurgeStatus);
+        Assert.Equal(1, handle.StopCalls);
+        Assert.Equal(1, run.Deleted);
+        Assert.Equal(1, run.Failed);
+    }
+
+    [Fact]
+    public void X12_CancellationRequestedAtGroupHead_NotAttemptedCancelled_ZeroStopZeroStart()
+    {
+        string p1 = @"\\h1\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+        string p2 = @"\\h2\d$\Tomcat\Tomcat\logs\tomcat85-stderr.2026-11-20.log";
+
+        var f1 = new LargestFile(p1, 100_000_000, Now) { VolumeSerial = 1, FileId = 1 };
+        var f2 = new LargestFile(p2, 100_000_000, Now) { VolumeSerial = 2, FileId = 2 };
+
+        var r1 = new ScanResult(@"\\h1\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h1\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f1.LogicalBytes, new List<LargestFile> { f1 }, true)
+        };
+        var r2 = new ScanResult(@"\\h2\d$\Tomcat", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = @"\\h2\d$\Tomcat",
+            Largest = new LargestFiles(new[] { "*.log" }, 1, f2.LogicalBytes, new List<LargestFile> { f2 }, true)
+        };
+
+        var services = new FakeServices();
+        services.Hosts["h1"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+        services.Hosts["h2"] = new[] { new ServiceEntry("tomcat85", "Tomcat85", @"D:\Tomcat\Tomcat", true) };
+
+        var fs = new FakeFs();
+        fs.HeldProbes[p1] = true;
+        fs.HeldProbes[p2] = true;
+        fs.Stats[p1] = new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+        fs.Stats[p2] = new PurgeFileInfo(p2, 100_000_000, Now, false, false, 1) { VolumeSerial = 2, FileIndex = 2 };
+        fs.OpenAfterStop[p1] = () => new PurgeFileInfo(p1, 100_000_000, Now, false, false, 1) { VolumeSerial = 1, FileIndex = 1 };
+
+        var cts = new CancellationTokenSource();
+        var handle1 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running,
+            CustomStart = () =>
+            {
+                cts.Cancel(); // cancel after group 1 start, before group 2 arrives at group head
+                return (true, 0);
+            }
+        };
+        var handle2 = new FakeServiceHandle
+        {
+            InitialState = ServiceState.Running,
+            StateAfterStop = ServiceState.Stopped,
+            StateAfterStart = ServiceState.Running
+        };
+
+        var control = new FakeServiceControl();
+        control.Services[("h1", "tomcat85")] = handle1;
+        control.Services[("h2", "tomcat85")] = handle2;
+
+        DateTime fakeTime = Now;
+        var run = Purge.Apply(new[] { r1, r2 }, 1, 1024, true, fs, () => fakeTime, null, cts.Token, services: services, control: control, localNow: () => new DateTime(2026, 11, 20, 20, 0, 0), sleep: ts => fakeTime += ts, yes: true);
+
+        Assert.Equal("deleted", run.Results[0].Largest!.Files[0].PurgeStatus);
+        Assert.Equal("not attempted: cancelled", run.Results[1].Largest!.Files[0].PurgeStatus);
+        Assert.Equal(1, handle1.StopCalls);
+        Assert.Equal(0, handle2.StopCalls);
+        Assert.Equal(0, handle2.StartCalls);
+    }
+
     private sealed class FakeServiceHandle : IServiceHandle
     {
         public int StopCalls { get; private set; }
@@ -866,6 +1513,7 @@ public sealed class PurgeServiceTests
         public (bool Ok, int Win32Error)? StartResult { get; set; }
         public (ServiceState State, string? Error)? QueryStateResult { get; set; }
         public IReadOnlyList<string>? Dependents { get; set; }
+        public string? DependentsError { get; set; }
 
         public Action? OnStop { get; set; }
         public Func<(bool Ok, int Win32Error)>? CustomStart { get; set; }
@@ -877,6 +1525,11 @@ public sealed class PurgeServiceTests
 
         public IReadOnlyList<string>? RunningDependents(out string? error)
         {
+            if (DependentsError != null)
+            {
+                error = DependentsError;
+                return null;
+            }
             error = null;
             return Dependents ?? Array.Empty<string>();
         }
@@ -923,10 +1576,16 @@ public sealed class PurgeServiceTests
     {
         public Dictionary<(string Host, string Key), FakeServiceHandle> Services { get; } = new();
         public int OpenCalls { get; private set; }
+        public string? OpenError { get; set; }
 
         public IServiceHandle? Open(string host, string key, out string? error)
         {
             OpenCalls++;
+            if (OpenError != null)
+            {
+                error = OpenError;
+                return null;
+            }
             error = null;
             if (Services.TryGetValue((host, key), out var handle))
             {
@@ -959,6 +1618,7 @@ public sealed class PurgeServiceTests
         public Dictionary<string, Func<PurgeFileInfo>> OpenAfterStop { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Func<string, PurgeOpen>? CustomOpen { get; set; }
         public Func<string, bool?>? CustomProbeHeld { get; set; }
+        public Action<string>? OnProbeHeld { get; set; }
 
         public string? ResolveRoot(string path, out string? error)
         {
@@ -1006,6 +1666,7 @@ public sealed class PurgeServiceTests
         public bool? ProbeHeld(string path, out string? error)
         {
             error = null;
+            OnProbeHeld?.Invoke(path);
             if (CustomProbeHeld != null) return CustomProbeHeld(path);
             if (HeldProbes.TryGetValue(path, out var held)) return held;
             return false;
