@@ -354,7 +354,7 @@ public class ProgramPurgeTests
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
                     sleep: _ => {});
-                Assert.Equal(3, code);
+                Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
                 Assert.Contains("error: tomcat85 on . did not start", error.ToString());
             }
 
@@ -381,7 +381,7 @@ public class ProgramPurgeTests
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
                     sleep: _ => {});
-                Assert.Equal(3, code);
+                Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
                 Assert.Contains("error: tomcat85 on . did not start", error.ToString());
             }
         }
