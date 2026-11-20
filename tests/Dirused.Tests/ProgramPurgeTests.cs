@@ -336,20 +336,20 @@ public class ProgramPurgeTests
             var logsDir = Path.Combine(dir, "logs");
             Directory.CreateDirectory(logsDir);
             var file = Path.Combine(logsDir, "tomcat85-stderr.2026-11-20.log");
-            File.WriteAllText(file, "test log " + new string('x', 2048));
+            File.WriteAllText(file, "test log " + new string('x', 3 * 1024));
             File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-4));
 
             var services = new TestServiceQuery(new[] { new ServiceEntry("tomcat85", "Tomcat85", dir, true) });
             var handle = new FailingStartServiceHandle();
             var control = new TestServiceControl(handle);
 
-            // 1. Scan path with /crit 0% (which would be exit 4 if not for start failure)
+            // 1. Scan path with /crit 1 (which would be exit 4 if not for start failure)
             using (var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var output = new StringWriter())
             using (var error = new StringWriter())
             {
                 int code = Program.RunWithPurge(
-                    new[] { dir, "/largest", "*.log", "/purge", "/confirm", "/yes", "/crit", "0%" },
+                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm", "/yes", "/crit", "1" },
                     output, error, Path.Combine(dir, "purge.log"),
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
@@ -364,9 +364,10 @@ public class ProgramPurgeTests
             using (var e = new StringWriter())
             {
                 int c = Program.RunWithPurge(
-                    new[] { dir, "/largest", "*.log", "/purge", "/savelist", list },
+                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/savelist", list },
                     o, e, Path.Combine(dir, "purge.log"));
                 Assert.Equal(0, c);
+                Assert.Contains("delete list saved: 1 file(s)", e.ToString());
             }
 
             handle.Reset();
@@ -375,7 +376,7 @@ public class ProgramPurgeTests
             using (var error = new StringWriter())
             {
                 int code = Program.RunWithPurge(
-                    new[] { "/fromlist", list, "/purge", "/confirm", "/yes", "/crit", "0%" },
+                    new[] { "/fromlist", list, "/purge", "/confirm", "/yes" },
                     output, error, Path.Combine(dir, "purge.log"),
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
