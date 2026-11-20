@@ -7,6 +7,8 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 ## [Unreleased]
 
 ### Added
+- `/purge` held-file detection: probes candidate files with share mode 0, discovers Procrun Tomcat services via read-only SCM queries, and reports `would delete after stopping <service>` in dry runs or `failed: in use by <service> (stop not available yet)` under `/confirm`.
+- `docs/purge.md`: comprehensive guide to the `/purge` decision path, statuses, held classification, and delete-list format with a Mermaid flowchart.
 - `/savelist <file>` writes the reviewed `/largest /purge` candidates with NTFS volume serial, file ID, size and exact modified time; `/fromlist <file> /purge` rechecks that identity before deletion. Invalid and duplicate lines are reported and produce exit code 3.
 - `/purge [days]` deletes the files `/largest <patterns>` lists that are older than days (default 1) and at least `/minsize` (default 1GB); a dry run unless `/confirm`; each deletion is logged to `C:\temp\dirused-purge.log`.
 - `/largest` lists the largest log, dump, backup and temp files under each target (patterns overridable); `/largestcount` sets how many.
@@ -14,6 +16,8 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- `/confirm` now checks NTFS volume serial and file ID for scan rows (`skipped: changed since scan (id)`) before deletion.
+- D1 age exemption: held Tomcat redirect logs are exempt from the purge age rule.
 - `/fromlist` dry runs now apply the same regular-file, hard-link, containment and read-only checks as `/confirm`; invalid list paths and purge-log open failures exit cleanly, and list HTML shows only purge results.
 - `/purge` labels files smaller than `/minsize` as `smaller than` before any age check.
 - `/purge` text and HTML output omit files smaller than `/minsize` and note how many were hidden; JSON and CSV still list every file.

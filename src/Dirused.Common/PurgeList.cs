@@ -11,7 +11,7 @@ public static class PurgeList
 {
     public static PurgeListSaveSummary Summarize(IEnumerable<ScanResult> results)
     {
-        var rows = results.SelectMany(r => r.Largest?.Files ?? new List<LargestFile>()).Where(f => f.PurgeStatus == "would delete").ToList();
+        var rows = results.SelectMany(r => r.Largest?.Files ?? new List<LargestFile>()).Where(f => Purge.IsWouldDelete(f.PurgeStatus)).ToList();
         bool HasIdentity(LargestFile f) => f.FileId.HasValue && f.FileId.Value != 0 && f.FileId.Value != ulong.MaxValue && f.VolumeSerial.HasValue && f.VolumeSerial.Value != 0 && f.LastWriteUtc != null;
         return new(rows.Count(HasIdentity), rows.Where(HasIdentity).Sum(f => f.LogicalBytes), rows.Count(f => !f.FileId.HasValue || f.FileId.Value == 0 || f.FileId.Value == ulong.MaxValue || !f.VolumeSerial.HasValue || f.VolumeSerial.Value == 0));
     }
@@ -44,6 +44,6 @@ public static class PurgeList
     public static void Write(string path, IEnumerable<ScanResult> results, int days, long minBytes, string version, string[] args)
     {
         string full=Path.GetFullPath(path), dir=Path.GetDirectoryName(full)!; Directory.CreateDirectory(dir); string temp=Path.Combine(dir,"."+Path.GetFileName(path)+"."+Guid.NewGuid().ToString("N")+".tmp");
-        try { using(var w=new StreamWriter(temp,false,new UTF8Encoding(true))){w.NewLine="\r\n";w.WriteLine(Header);w.WriteLine("# purge days="+days.ToString(CultureInfo.InvariantCulture)+" minsize="+minBytes.ToString(CultureInfo.InvariantCulture));w.WriteLine("# tool version="+version);w.WriteLine("# utc="+DateTime.UtcNow.ToString("O",CultureInfo.InvariantCulture));w.WriteLine("# args="+string.Join(" ",args));w.WriteLine("# target\tvolumeSerial\tfileId\tbytes\tlastWriteUtc\tpath"); foreach(var result in results) foreach(var f in result.Largest?.Files??new()){if(f.PurgeStatus!="would delete"||f.FileId==null||f.FileId==0||f.FileId==ulong.MaxValue||f.VolumeSerial==null||f.VolumeSerial==0||f.LastWriteUtc==null)continue; w.WriteLine($"{result.ScanRoot??result.Target}\t{f.VolumeSerial:X8}\t{f.FileId:X16}\t{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)}\t{f.LastWriteUtc.Value.ToString("O",CultureInfo.InvariantCulture)}\t{f.Path}");}} File.Move(temp,full,true); } finally {if(File.Exists(temp))File.Delete(temp);}
+        try { using(var w=new StreamWriter(temp,false,new UTF8Encoding(true))){w.NewLine="\r\n";w.WriteLine(Header);w.WriteLine("# purge days="+days.ToString(CultureInfo.InvariantCulture)+" minsize="+minBytes.ToString(CultureInfo.InvariantCulture));w.WriteLine("# tool version="+version);w.WriteLine("# utc="+DateTime.UtcNow.ToString("O",CultureInfo.InvariantCulture));w.WriteLine("# args="+string.Join(" ",args));w.WriteLine("# target\tvolumeSerial\tfileId\tbytes\tlastWriteUtc\tpath"); foreach(var result in results) foreach(var f in result.Largest?.Files??new()){if(!Purge.IsWouldDelete(f.PurgeStatus)||f.FileId==null||f.FileId==0||f.FileId==ulong.MaxValue||f.VolumeSerial==null||f.VolumeSerial==0||f.LastWriteUtc==null)continue; w.WriteLine($"{result.ScanRoot??result.Target}\t{f.VolumeSerial:X8}\t{f.FileId:X16}\t{f.LogicalBytes.ToString(CultureInfo.InvariantCulture)}\t{f.LastWriteUtc.Value.ToString("O",CultureInfo.InvariantCulture)}\t{f.Path}");}} File.Move(temp,full,true); } finally {if(File.Exists(temp))File.Delete(temp);}
     }
 }

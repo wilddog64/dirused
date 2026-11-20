@@ -180,7 +180,7 @@ public class ProgramPurgeTests
             var fs = new SwapSubfolderOnOpenFileSystem(new RealPurgeFileSystem(), inside, moved, junction, outside);
             using var output = new StringWriter(); using var error = new StringWriter();
             Program.RunWithPurge(new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm" }, output, error, Path.Combine(dir, "purge.log"), fs);
-            Assert.Contains("[skipped: outside target]", output.ToString()); Assert.True(File.Exists(outsideFile)); Assert.True(File.Exists(Path.Combine(moved, "big.log")));
+            Assert.Contains("[skipped: changed since scan (id)]", output.ToString()); Assert.True(File.Exists(outsideFile)); Assert.True(File.Exists(Path.Combine(moved, "big.log")));
 
             var control = Scratch();
             try
@@ -311,7 +311,7 @@ public class ProgramPurgeTests
     public void FromListDryRunStatsAnOpenFileWithoutShareDelete()
     {
         var dir=Scratch();try{var file=Path.Combine(dir,"held.log");File.WriteAllText(file,"held content"+new string('x',2048));File.SetLastWriteTimeUtc(file,DateTime.UtcNow.AddDays(-4));var list=Path.Combine(dir,"delete.txt");var log=Path.Combine(dir,"purge.log");using(var o=new StringWriter())using(var e=new StringWriter())Program.RunWithPurge(new[]{dir,"/largest","*.log","/purge","/minsize","1KB","/savelist",list},o,e,log);
-            using(var held=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var o=new StringWriter())using(var e=new StringWriter()){int c=Program.RunWithPurge(new[]{"/fromlist",list,"/purge"},o,e,log);Assert.Equal(0,c);Assert.Contains("[would delete]",o.ToString());Assert.True(File.Exists(file));}
+            using(var held=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var o=new StringWriter())using(var e=new StringWriter()){int c=Program.RunWithPurge(new[]{"/fromlist",list,"/purge"},o,e,log);Assert.Equal(0,c);Assert.Contains("[skipped: in use (no service found)]",o.ToString());Assert.True(File.Exists(file));}
         }finally{Directory.Delete(dir,true);}
     }
 

@@ -21,8 +21,9 @@ public sealed class PurgeOpen : IDisposable
     public PurgeFileInfo? Info { get; }
     public string? Error { get; }
     public bool NotFound { get; }
+    public int ErrorCode { get; }
     public PurgeOpen(PurgeFileInfo info, IDisposable handle, Action mark, Action? unmark = null) { Info = info; this.handle = handle; this.mark = mark; this.unmark = unmark; }
-    public PurgeOpen(string error, bool notFound = false) { Error = error; NotFound = notFound; }
+    public PurgeOpen(string error, bool notFound = false, int errorCode = 0) { Error = error; NotFound = notFound; ErrorCode = errorCode; }
     public void MarkDelete() => (mark ?? throw new InvalidOperationException(Error ?? "No open handle"))();
     public void UnmarkDelete() => (unmark ?? throw new InvalidOperationException(Error ?? "No open handle"))();
     public void Dispose() => handle?.Dispose();
@@ -33,17 +34,26 @@ public interface IPurgeFileSystem
     string? ResolveRoot(string path, out string? error);
     PurgeOpen Open(string path);
     PurgeFileInfo? Stat(string path, out string? error, out bool notFound) { error = "Stat unavailable"; notFound = false; return null; }
+    bool? ProbeHeld(string path, out string? error) { error = "probe unavailable"; return null; }
 }
+
+public sealed record HeldFilesSummary(int Total, string? Service, string? Host, string? InstallRoot, int TomcatCount, long TomcatBytes, int OtherCount);
 
 public sealed record PurgeRun(IReadOnlyList<ScanResult> Results, int WouldDelete, int Deleted, int Skipped, int Failed, int NotAttempted, long WouldDeleteBytes, long DeletedBytes)
 {
     public int ListErrors { get; init; }
     public IReadOnlyList<BadPurgeListLine> BadListLines { get; init; } = Array.Empty<BadPurgeListLine>();
+    public HeldFilesSummary? HeldSummary { get; init; }
+    public int ProbeFailures { get; init; }
+    public string? FirstProbeError { get; init; }
 }
 public static class PurgeLog { public const string DefaultPath = @"C:\temp\dirused-purge.log"; }
 
 public static class Purge
 {
+    public static bool IsWouldDelete(string? status) =>
+        status == "would delete" || (status != null && status.StartsWith("would delete after stopping ", StringComparison.Ordinal));
+
     public static bool IsStrictlyUnder(string path, string root)
     {
         static string[] Parts(string s) => s.Replace('/', '\\').Split('\\', StringSplitOptions.RemoveEmptyEntries);
@@ -55,7 +65,18 @@ public static class Purge
         return absolute && rootAbsolute;
     }
 
-    public static PurgeRun Apply(IReadOnlyList<ScanResult> results, int days, long minBytes, bool confirm, IPurgeFileSystem fs, Func<DateTime> utcNow, Action<string>? log, CancellationToken ct, string? purgeLogPath = null)
+    public static PurgeRun Apply(
+        IReadOnlyList<ScanResult> results,
+        int days,
+        long minBytes,
+        bool confirm,
+        IPurgeFileSystem fs,
+        Func<DateTime> utcNow,
+        Action<string>? log,
+        CancellationToken ct,
+        string? purgeLogPath = null,
+        IServiceQuery? services = null,
+        Func<string, bool>? isFixedDrive = null)
     {
         DateTime cutoff = utcNow().AddDays(-days);
         purgeLogPath ??= PurgeLog.DefaultPath;
@@ -63,6 +84,40 @@ public static class Purge
         long wouldBytes = 0, deletedBytes = 0;
         string? stopReason = null;
         var output = new List<ScanResult>();
+        int probeFailures = 0;
+        string? firstProbeError = null;
+        int heldTotal = 0;
+        int heldTomcatCount = 0;
+        long heldTomcatBytes = 0;
+        int heldOtherCount = 0;
+        string? heldService = null;
+        string? heldHost = null;
+        string? heldInstallRoot = null;
+        var serviceCache = new Dictionary<string, (IReadOnlyList<ServiceEntry>? List, string? Error)>(StringComparer.OrdinalIgnoreCase);
+
+        void RecordHeldClassification(LargestFile f, bool isConfirm, out string statusText)
+        {
+            heldTotal++;
+            var classification = ServiceQueryHelpers.ClassifyHeldFile(f, fs, services, isFixedDrive, serviceCache);
+            if (classification.Reason == "tomcat")
+            {
+                heldTomcatCount++;
+                heldTomcatBytes += f.LogicalBytes;
+                heldService ??= classification.Service!.Key;
+                heldHost ??= classification.Host;
+                heldInstallRoot ??= classification.InstallRoot;
+                statusText = isConfirm
+                    ? $"failed: in use by {classification.Service!.Key} (stop not available yet)"
+                    : $"would delete after stopping {classification.Service!.Key}";
+            }
+            else
+            {
+                heldOtherCount++;
+                statusText = isConfirm
+                    ? $"failed: in use ({classification.Reason})"
+                    : $"skipped: in use ({classification.Reason})";
+            }
+        }
 
         foreach (var result in results)
         {
@@ -88,7 +143,40 @@ public static class Purge
                 else if (IsPurgeLog(file.Path, purgeLogPath)) status = "skipped: purge log";
                 else if (file.LogicalBytes < minBytes) status = $"skipped: smaller than {Dirused.Common.Renderers.Format.Size(minBytes)}";
                 else if (file.LastWriteUtc == null) status = "skipped: modification time unknown";
-                else if (file.LastWriteUtc >= cutoff) status = $"skipped: modified within {days} day(s)";
+                else if (file.LastWriteUtc >= cutoff)
+                {
+                    if (services != null && ServiceQueryHelpers.IsRedirectLogName(file.Path))
+                    {
+                        bool? probed = fs.ProbeHeld(file.Path, out _);
+                        if (probed == true)
+                        {
+                            RecordHeldClassification(file, confirm, out status);
+                            if (IsWouldDelete(status))
+                            {
+                                would++;
+                                wouldBytes += file.LogicalBytes;
+                                targetBytes += file.LogicalBytes;
+                            }
+                            else if (confirm && status.StartsWith("failed: in use by ", StringComparison.Ordinal))
+                            {
+                                try { log?.Invoke(LogLine(utcNow(), file.Path, file.LogicalBytes, status)); }
+                                catch { stopReason = "log write failed"; }
+                            }
+                            else
+                            {
+                                status = $"skipped: modified within {days} day(s)";
+                            }
+                        }
+                        else
+                        {
+                            status = $"skipped: modified within {days} day(s)";
+                        }
+                    }
+                    else
+                    {
+                        status = $"skipped: modified within {days} day(s)";
+                    }
+                }
                 else if (file.FromList && !confirm)
                 {
                     PurgeFileInfo? stat = null; string? statError = null; bool missing = false;
@@ -106,12 +194,118 @@ public static class Purge
                         catch (Exception ex) { finalRoot = null; resolveError = ex.Message; }
                         if (finalRoot == null) status = "failed: cannot open target: " + (resolveError ?? "unknown error");
                         else if (!IsStrictlyUnder(stat.FinalPath, finalRoot)) status = "skipped: outside target";
-                        else if (stat.Length != file.LogicalBytes || stat.LastWriteUtc != file.LastWriteUtc) status = "skipped: file changed since list (size or time)";
+                        else if (stat.Length != file.LogicalBytes || stat.LastWriteUtc != file.LastWriteUtc)
+                        {
+                            if (services != null && ServiceQueryHelpers.IsRedirectLogName(file.Path) && stat.Length >= file.LogicalBytes)
+                            {
+                                bool? probed = fs.ProbeHeld(file.Path, out _);
+                                if (probed == true)
+                                {
+                                    RecordHeldClassification(file, false, out status);
+                                    if (IsWouldDelete(status))
+                                    {
+                                        would++;
+                                        wouldBytes += file.LogicalBytes;
+                                        targetBytes += file.LogicalBytes;
+                                    }
+                                    else
+                                    {
+                                        status = "skipped: file changed since list (size or time)";
+                                    }
+                                }
+                                else
+                                {
+                                    status = "skipped: file changed since list (size or time)";
+                                }
+                            }
+                            else
+                            {
+                                status = "skipped: file changed since list (size or time)";
+                            }
+                        }
                         else if (stat.IsReadOnly) status = "skipped: read-only";
-                        else { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
+                        else
+                        {
+                            if (services != null)
+                            {
+                                bool? probed = fs.ProbeHeld(file.Path, out string? probeErr);
+                                if (probed == null)
+                                {
+                                    probeFailures++;
+                                    firstProbeError ??= probeErr;
+                                    status = "would delete";
+                                    would++;
+                                    wouldBytes += file.LogicalBytes;
+                                    targetBytes += file.LogicalBytes;
+                                }
+                                else if (probed == false)
+                                {
+                                    status = "would delete";
+                                    would++;
+                                    wouldBytes += file.LogicalBytes;
+                                    targetBytes += file.LogicalBytes;
+                                }
+                                else
+                                {
+                                    RecordHeldClassification(file, false, out status);
+                                    if (IsWouldDelete(status))
+                                    {
+                                        would++;
+                                        wouldBytes += file.LogicalBytes;
+                                        targetBytes += file.LogicalBytes;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                status = "would delete";
+                                would++;
+                                wouldBytes += file.LogicalBytes;
+                                targetBytes += file.LogicalBytes;
+                            }
+                        }
                     }
                 }
-                else if (!confirm) { status = "would delete"; would++; wouldBytes += file.LogicalBytes; targetBytes += file.LogicalBytes; }
+                else if (!confirm)
+                {
+                    if (services != null)
+                    {
+                        bool? probed = fs.ProbeHeld(file.Path, out string? probeErr);
+                        if (probed == null)
+                        {
+                            probeFailures++;
+                            firstProbeError ??= probeErr;
+                            status = "would delete";
+                            would++;
+                            wouldBytes += file.LogicalBytes;
+                            targetBytes += file.LogicalBytes;
+                        }
+                        else if (probed == false)
+                        {
+                            status = "would delete";
+                            would++;
+                            wouldBytes += file.LogicalBytes;
+                            targetBytes += file.LogicalBytes;
+                        }
+                        else
+                        {
+                            RecordHeldClassification(file, false, out status);
+                            if (IsWouldDelete(status))
+                            {
+                                would++;
+                                wouldBytes += file.LogicalBytes;
+                                targetBytes += file.LogicalBytes;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        status = "would delete";
+                        would++;
+                        wouldBytes += file.LogicalBytes;
+                        targetBytes += file.LogicalBytes;
+                    }
+                }
                 else if (targetFinal == null)
                 {
                     status = "failed: cannot open target: " + (rootError ?? "unknown error");
@@ -120,7 +314,7 @@ public static class Purge
                 }
                 else
                 {
-                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed);
+                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot);
                     if (status == "deleted") { deleted++; deletedBytes += freed; targetBytes += freed; }
                 }
 
@@ -131,10 +325,37 @@ public static class Purge
             }
             output.Add(result with { Largest = result.Largest with { Files = files, PurgeBytes = targetBytes, PurgeDryRun = !confirm } });
         }
-        return new(output, would, deleted, skipped, failed, notAttempted, wouldBytes, deletedBytes);
+
+        HeldFilesSummary? heldSummary = heldTotal > 0
+            ? new HeldFilesSummary(heldTotal, heldService, heldHost, heldInstallRoot, heldTomcatCount, heldTomcatBytes, heldOtherCount)
+            : null;
+
+        return new(output, would, deleted, skipped, failed, notAttempted, wouldBytes, deletedBytes)
+        {
+            HeldSummary = heldSummary,
+            ProbeFailures = probeFailures,
+            FirstProbeError = firstProbeError
+        };
     }
 
-    private static string ProcessFile(LargestFile file, string targetFinal, IPurgeFileSystem fs, Func<DateTime> utcNow, Action<string>? log, ref string? stopReason, out long freed)
+    private static string ProcessFile(
+        LargestFile file,
+        string targetFinal,
+        IPurgeFileSystem fs,
+        Func<DateTime> utcNow,
+        Action<string>? log,
+        ref string? stopReason,
+        out long freed,
+        IServiceQuery? services,
+        Func<string, bool>? isFixedDrive,
+        Dictionary<string, (IReadOnlyList<ServiceEntry>? List, string? Error)> serviceCache,
+        ref int heldTotal,
+        ref int heldTomcatCount,
+        ref long heldTomcatBytes,
+        ref int heldOtherCount,
+        ref string? heldService,
+        ref string? heldHost,
+        ref string? heldInstallRoot)
     {
         freed = 0;
         PurgeOpen? opened = null;
@@ -145,12 +366,38 @@ public static class Purge
         {
             opened = fs.Open(file.Path);
             if (opened.NotFound) status = "skipped: no longer exists";
-            else if (opened.Info == null) status = "failed: " + (opened.Error ?? "unknown error");
+            else if (opened.Info == null)
+            {
+                if (services != null && opened.ErrorCode == 32)
+                {
+                    heldTotal++;
+                    var classification = ServiceQueryHelpers.ClassifyHeldFile(file, fs, services, isFixedDrive, serviceCache);
+                    if (classification.Reason == "tomcat")
+                    {
+                        heldTomcatCount++;
+                        heldTomcatBytes += file.LogicalBytes;
+                        heldService ??= classification.Service!.Key;
+                        heldHost ??= classification.Host;
+                        heldInstallRoot ??= classification.InstallRoot;
+                        status = $"failed: in use by {classification.Service!.Key} (stop not available yet)";
+                    }
+                    else
+                    {
+                        heldOtherCount++;
+                        status = $"failed: in use ({classification.Reason})";
+                    }
+                }
+                else
+                {
+                    status = "failed: " + (opened.Error ?? "unknown error");
+                }
+            }
             else
             {
                 var info = opened.Info;
                 if (file.FromList && (info.VolumeSerial == null || info.VolumeSerial != file.VolumeSerial)) status = "skipped: file changed since list (volume)";
                 else if (file.FromList && (info.FileIndex == null || info.FileIndex != file.FileId)) status = "skipped: file changed since list (id)";
+                else if (!file.FromList && file.VolumeSerial != null && file.FileId != null && (info.VolumeSerial != file.VolumeSerial || info.FileIndex != file.FileId)) status = "skipped: changed since scan (id)";
                 else if (info.IsDirectory || info.IsReparsePoint) status = "skipped: not a regular file";
                 else if (info.LinkCount != 1) status = "skipped: hard-linked";
                 else if (!IsStrictlyUnder(info.FinalPath, targetFinal)) status = "skipped: outside target";
@@ -221,6 +468,7 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
 {
     private const uint Delete = 0x00010000, ReadAttributes = 0x80, ShareAll = 0x1 | 0x2 | 0x4, OpenExisting = 3;
     private const uint OpenReparsePoint = 0x00200000, BackupSemantics = 0x02000000, FileNameOpened = 0x8;
+    private const uint FileReadData = 0x0001;
     private uint finalPathFlags;
 
     public string? ResolveRoot(string path, out string? error)
@@ -255,6 +503,29 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
         return new PurgeFileInfo(finalPath, size, DateTime.FromFileTimeUtc(ticks), (d.Attributes & 0x10) != 0, (d.Attributes & 0x400) != 0, (int)d.Links) { IsReadOnly = (d.Attributes & 0x1) != 0, VolumeSerial = d.Volume, FileIndex = ((ulong)d.IndexHigh << 32) | d.IndexLow };
     }
 
+    public bool? ProbeHeld(string path, out string? error)
+    {
+        error = null;
+        if (!IsAbsoluteWindowsPath(path)) { error = "path is not absolute"; return null; }
+        try
+        {
+            using var handle = CreateFileW(Extended(path), FileReadData, 0, IntPtr.Zero, OpenExisting, OpenReparsePoint | BackupSemantics, IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int e = Marshal.GetLastWin32Error();
+                if (e == 32) return true;
+                error = new Win32Exception(e).Message;
+                return null;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
     public PurgeOpen Open(string path)
     {
         if (!IsAbsoluteWindowsPath(path)) return new PurgeOpen("path is not absolute");
@@ -265,7 +536,7 @@ public sealed class RealPurgeFileSystem : IPurgeFileSystem
             if (handle.IsInvalid)
             {
                 int e = Marshal.GetLastWin32Error(); handle.Dispose(); handle = null;
-                return new PurgeOpen(new Win32Exception(e).Message, e is 2 or 3);
+                return new PurgeOpen(new Win32Exception(e).Message, e is 2 or 3, e);
             }
             if (!GetFileInformationByHandle(handle, out var data)) return FailAndClose(handle, new Win32Exception(Marshal.GetLastWin32Error()).Message);
             if (!TryGetFinalPath(handle, finalPathFlags, out var finalPath)) return FailAndClose(handle, new Win32Exception(Marshal.GetLastWin32Error()).Message);
