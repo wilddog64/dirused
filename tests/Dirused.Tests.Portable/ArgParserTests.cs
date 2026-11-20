@@ -303,4 +303,21 @@ public class ArgParserTests
             Assert.DoesNotContain(ArgParser.MultiTargetWarning, err5.ToString());
         }
     }
+
+    [Fact]
+    public void M11_YesSwitchRequiresPurgeConfirm()
+    {
+        Assert.Equal("/yes needs /purge /confirm", ArgParser.Parse(new[] { "C:\\", "/yes" }).Error);
+        Assert.Equal("/yes needs /purge /confirm", ArgParser.Parse(new[] { "C:\\", "/purge", "/largest", "*.log", "/yes" }).Error);
+        Assert.Equal("/confirm requires /purge", ArgParser.Parse(new[] { "C:\\", "/confirm", "/yes" }).Error);
+        Assert.Equal("/yes needs /purge /confirm", ArgParser.Parse(new[] { "/fromlist", "f", "/purge", "/yes" }).Error);
+
+        var scanOk = ArgParser.Parse(new[] { "C:\\", "/largest", "*.log", "/purge", "/confirm", "/yes" });
+        Assert.Null(scanOk.Error);
+        Assert.True(scanOk.Options!.Yes);
+
+        var fromListOk = ArgParser.Parse(new[] { "/fromlist", "f", "/purge", "/confirm", "/yes" });
+        Assert.Null(fromListOk.Error);
+        Assert.True(fromListOk.Options!.Yes);
+    }
 }

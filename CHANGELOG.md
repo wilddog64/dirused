@@ -8,6 +8,10 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 
 ### Added
 - `/purge` held-file detection: probes candidate files with share mode 0, discovers Procrun Tomcat services via read-only SCM queries, and reports `would delete after stopping <service>` in dry runs or `failed: in use by <service> (stop not available yet)` under `/confirm`.
+- `/purge /confirm` stops Tomcat for held redirect logs, deletes them, restarts Tomcat, and verifies it returns to Running.
+- Switch `/yes` with `/purge /confirm`: automates service stops within the off-hours window (19:00–06:00).
+- Automatic recovery warning on next run if a previously stopped Tomcat service remains down.
+- Exit code 3 precedence on service start failure over exit 4 critical threshold warnings.
 - `docs/purge.md`: comprehensive guide to the `/purge` decision path, statuses, held classification, and delete-list format with a Mermaid flowchart.
 - `/savelist <file>` writes the reviewed `/largest /purge` candidates with NTFS volume serial, file ID, size and exact modified time; `/fromlist <file> /purge` rechecks that identity before deletion. Invalid and duplicate lines are reported and produce exit code 3.
 - `/purge [days]` deletes the files `/largest <patterns>` lists that are older than days (default 1) and at least `/minsize` (default 1GB); a dry run unless `/confirm`; each deletion is logged to `C:\temp\dirused-purge.log`.

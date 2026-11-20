@@ -6,5 +6,5 @@ public record Options(IReadOnlyList<string> Targets, int Top = 50, OutputFormat 
     int Deep = 1, bool Exact = false, bool DeepGiven = false, int Warn = 85, int Crit = 90,
     bool Html = false, string? Output = null, IReadOnlyList<string>? Largest = null, int LargestCount = 20,
     bool Purge = false, int PurgeDays = 1, bool Confirm = false, long PurgeMinBytes = 1L << 30,
-    bool PurgeNeedsPatterns = false, string? SaveList = null, string? FromList = null);
+    bool PurgeNeedsPatterns = false, string? SaveList = null, string? FromList = null, bool Yes = false);
 public record ParseResult(Options? Options = null, string? Error = null, bool Usage = false);

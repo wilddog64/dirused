@@ -327,6 +327,102 @@ public class ProgramPurgeTests
         var dir=Scratch();try{var list=Path.Combine(dir,"bad.txt");var log=Path.Combine(dir,"purge.log");var output=Path.Combine(dir,"report.txt");File.WriteAllText(list,"not a list"+new string('x',2048));File.WriteAllText(log,"log sentinel");File.WriteAllText(output,"output sentinel");using var o=new StringWriter();using var e=new StringWriter();int code=Program.RunWithPurge(new[]{"/fromlist",list,"/purge","/confirm","/output",output},o,e,log);Assert.Equal(1,code);Assert.Contains($"not a dirused delete list: {list}",e.ToString());Assert.Equal("log sentinel",File.ReadAllText(log));Assert.Equal("output sentinel",File.ReadAllText(output));}finally{Directory.Delete(dir,true);}
     }
 
+    [Fact]
+    public void ServiceStartFailureExits3WithCritTargetOnScanPathAndFromList()
+    {
+        var dir = Scratch();
+        try
+        {
+            var logsDir = Path.Combine(dir, "logs");
+            Directory.CreateDirectory(logsDir);
+            var file = Path.Combine(logsDir, "tomcat85-stderr.2026-11-20.log");
+            File.WriteAllText(file, "test log " + new string('x', 3 * 1024));
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-4));
+
+            var services = new TestServiceQuery(new[] { new ServiceEntry("tomcat85", "Tomcat85", dir, true) });
+            var handle = new FailingStartServiceHandle();
+            var control = new TestServiceControl(handle);
+            var clock = new DateTime(2026, 11, 20, 12, 0, 0, DateTimeKind.Utc);
+            Func<DateTime> utcNow = () => clock;
+            Action<TimeSpan> sleep = d => clock += d;
+
+            // 1. Scan path with /warn 1 /crit 2 (which would be exit 4 if not for start failure)
+            using (var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var output = new StringWriter())
+            using (var error = new StringWriter())
+            {
+                int code = Program.RunWithPurge(
+                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm", "/yes", "/warn", "1", "/crit", "2" },
+                    output, error, Path.Combine(dir, "purge.log"),
+                    services: services, control: control,
+                    localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                    sleep: sleep, utcNow: utcNow);
+                Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
+                Assert.Contains("error: tomcat85 did not start", error.ToString());
+            }
+
+            // 2. /fromlist path
+            var list = Path.Combine(dir, "delete.txt");
+            using (var o = new StringWriter())
+            using (var e = new StringWriter())
+            {
+                int c = Program.RunWithPurge(
+                    new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/savelist", list },
+                    o, e, Path.Combine(dir, "purge.log"));
+                Assert.Equal(0, c);
+                Assert.Contains("delete list saved: 1 file(s)", e.ToString());
+            }
+
+            handle.Reset();
+            using (var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var output = new StringWriter())
+            using (var error = new StringWriter())
+            {
+                int code = Program.RunWithPurge(
+                    new[] { "/fromlist", list, "/purge", "/confirm", "/yes" },
+                    output, error, Path.Combine(dir, "purge.log"),
+                    services: services, control: control,
+                    localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
+                    sleep: sleep, utcNow: utcNow);
+                Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
+                Assert.Contains("error: tomcat85 did not start", error.ToString());
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private sealed class TestServiceQuery(IReadOnlyList<ServiceEntry> entries) : IServiceQuery
+    {
+        public IReadOnlyList<ServiceEntry>? ListProcrun(string host, out string? error)
+        {
+            error = null;
+            return entries;
+        }
+    }
+
+    private sealed class TestServiceControl(IServiceHandle handle) : IServiceControl
+    {
+        public IServiceHandle? Open(string host, string key, out string? error)
+        {
+            error = null;
+            return handle;
+        }
+    }
+
+    private sealed class FailingStartServiceHandle : IServiceHandle
+    {
+        private bool stopped;
+        public void Reset() { stopped = false; }
+        public IReadOnlyList<string>? RunningDependents(out string? error) { error = null; return Array.Empty<string>(); }
+        public (bool Ok, int Win32Error) Stop() { stopped = true; return (true, 0); }
+        public (bool Ok, int Win32Error) Start() => (false, 1053);
+        public (ServiceState State, string? Error) QueryState() => (stopped ? ServiceState.Stopped : ServiceState.Running, null);
+        public void Dispose() {}
+    }
+
     private static string Scratch()
     {
         string path = Path.Combine(Path.GetTempPath(), "dirused-purge-" + Guid.NewGuid().ToString("N"));
