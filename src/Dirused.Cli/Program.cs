@@ -148,11 +148,11 @@ public static class Program
                 var h = purgeRun.HeldSummary;
                 if (h.TomcatCount > 0 && h.Service != null)
                 {
-                    output.WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
+                    (options.Format != OutputFormat.Text ? error : renderOutput).WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
                 }
                 else
                 {
-                    output.WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
+                    (options.Format != OutputFormat.Text ? error : renderOutput).WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
                 }
             }
             if (options.SaveList != null && purgeRun != null)
@@ -208,11 +208,11 @@ public static class Program
                 var h = run.HeldSummary;
                 if (h.TomcatCount > 0 && h.Service != null)
                 {
-                    output.WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
+                    (options.Format != OutputFormat.Text ? error : destination).WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
                 }
                 else
                 {
-                    output.WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
+                    (options.Format != OutputFormat.Text ? error : destination).WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
                 }
             }
             if(run.ListErrors>0){error.WriteLine("Bad list lines:");foreach(var e in run.BadListLines)error.WriteLine($"  line {e.Line}: {e.Reason}");}
