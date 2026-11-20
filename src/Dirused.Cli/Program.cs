@@ -17,8 +17,8 @@ public static class Program
     public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
     public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares) => RunCore(args, output, error, nodeShares, null, "0.0.0-dev");
     public static int RunWithReleaseSource(string[] args, TextWriter output, TextWriter error, IReleaseSource source, string version, string? updateStatePath = null) => RunCore(args, output, error, null, source, version, updateStatePath);
-    public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs, services, isFixedDrive, control, input, isInputRedirected, localNow, sleep);
-    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? serviceControl = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null)
+    public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs, services, isFixedDrive, control, input, isInputRedirected, localNow, sleep, utcNow);
+    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? serviceControl = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null)
     {
         IServiceQuery? effectiveServices = services ?? (OperatingSystem.IsWindows() ? new RealServiceQuery() : null);
         Func<string, bool>? effectiveFixedDrive = isFixedDrive;
@@ -70,7 +70,7 @@ public static class Program
             if (options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
             if (!PurgeList.Read(options.FromList, out var parsedList)) { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
             if (!OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
-            return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs, effectiveServices, effectiveFixedDrive, effectiveControl, effectiveInput, effectiveInputRedirected, effectiveLocalNow, effectiveSleep);
+            return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs, effectiveServices, effectiveFixedDrive, effectiveControl, effectiveInput, effectiveInputRedirected, effectiveLocalNow, effectiveSleep, utcNow);
         }
         if (options.Purge && !OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
         if (options.Purge && options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
@@ -116,7 +116,7 @@ public static class Program
             PurgeRun? purgeRun = null;
             if (options.Purge)
             {
-                purgeRun = Purge.Apply(results, options.PurgeDays, options.PurgeMinBytes, options.Confirm, purgeFs ?? new RealPurgeFileSystem(), () => DateTime.UtcNow, options.Confirm ? line => purgeLog!.WriteLine(line) : null, cts.Token, effectivePurgeLog, effectiveServices, effectiveFixedDrive, effectiveControl, effectiveLocalNow, effectiveSleep, effectiveInput, effectiveInputRedirected, options.Yes, error);
+                purgeRun = Purge.Apply(results, options.PurgeDays, options.PurgeMinBytes, options.Confirm, purgeFs ?? new RealPurgeFileSystem(), utcNow ?? (() => DateTime.UtcNow), options.Confirm ? line => purgeLog!.WriteLine(line) : null, cts.Token, effectivePurgeLog, effectiveServices, effectiveFixedDrive, effectiveControl, effectiveLocalNow, effectiveSleep, effectiveInput, effectiveInputRedirected, options.Yes, error);
                 results = purgeRun.Results.ToList();
             }
             IRenderer renderer = options.Format switch
@@ -190,7 +190,7 @@ public static class Program
         }
     }
 
-    private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool inputRedirected = false, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null)
+    private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool inputRedirected = false, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null)
     {
         var results=list.Files.GroupBy(f=>f.ListTarget??Path.GetDirectoryName(f.Path)??f.Path,StringComparer.OrdinalIgnoreCase).Select(g=>new ScanResult(g.Key,new Volume("",0,0,0,0),new(),new(),new(),true){ScanRoot=g.Key,Largest=new LargestFiles(Array.Empty<string>(),g.Count(),g.Sum(x=>x.LogicalBytes),g.ToList(),true)}).ToList();
         StreamWriter? log=null; StreamWriter? report=null; string reportPath="";
@@ -201,7 +201,7 @@ public static class Program
             if(options.Confirm){try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);log=new StreamWriter(new FileStream(logPath,FileMode.Append,FileAccess.Write,FileShare.Read)){AutoFlush=true}; } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException or NotSupportedException) { error.WriteLine($"Cannot open purge log '{logPath}': {ex.Message}; nothing was deleted"); return 1; }}
             TextWriter destination=output;
             if(options.Output!=null){if(!ReportOutput.TryOpen(options.Output,out report,out reportPath,out var openError)){error.WriteLine(openError);return 1;} if(!options.Html)destination=report!;}
-            var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),()=>DateTime.UtcNow,options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath,services,isFixedDrive,control,localNow,sleep,input,inputRedirected,options.Yes,error) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
+            var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),utcNow??(()=>DateTime.UtcNow),options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath,services,isFixedDrive,control,localNow,sleep,input,inputRedirected,options.Yes,error) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
             IRenderer renderer=options.Format switch {OutputFormat.Json=>new JsonRenderer(false),OutputFormat.Csv=>new CsvRenderer(false,85,90,true),_=>new TextRenderer()};
             renderer.Render(destination,run.Results);
             if(options.Html){new HtmlRenderer(false,85,90,50).Render(report!,run.Results);error.WriteLine($"HTML report: {reportPath}");} else if(report!=null)error.WriteLine($"Report: {reportPath}");

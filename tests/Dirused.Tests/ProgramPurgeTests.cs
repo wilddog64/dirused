@@ -342,6 +342,9 @@ public class ProgramPurgeTests
             var services = new TestServiceQuery(new[] { new ServiceEntry("tomcat85", "Tomcat85", dir, true) });
             var handle = new FailingStartServiceHandle();
             var control = new TestServiceControl(handle);
+            var clock = new DateTime(2026, 11, 20, 12, 0, 0, DateTimeKind.Utc);
+            Func<DateTime> utcNow = () => clock;
+            Action<TimeSpan> sleep = d => clock += d;
 
             // 1. Scan path with /warn 1 /crit 2 (which would be exit 4 if not for start failure)
             using (var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -353,9 +356,9 @@ public class ProgramPurgeTests
                     output, error, Path.Combine(dir, "purge.log"),
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                    sleep: _ => {});
+                    sleep: sleep, utcNow: utcNow);
                 Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
-                Assert.Contains("error: tomcat85 on . did not start", error.ToString());
+                Assert.Contains("error: tomcat85 did not start", error.ToString());
             }
 
             // 2. /fromlist path
@@ -380,9 +383,9 @@ public class ProgramPurgeTests
                     output, error, Path.Combine(dir, "purge.log"),
                     services: services, control: control,
                     localNow: () => new DateTime(2026, 11, 20, 20, 0, 0),
-                    sleep: _ => {});
+                    sleep: sleep, utcNow: utcNow);
                 Assert.True(code == 3, $"expected exit 3, got {code}; stderr: {error}; stdout: {output}");
-                Assert.Contains("error: tomcat85 on . did not start", error.ToString());
+                Assert.Contains("error: tomcat85 did not start", error.ToString());
             }
         }
         finally
