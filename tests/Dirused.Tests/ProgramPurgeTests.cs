@@ -180,7 +180,7 @@ public class ProgramPurgeTests
             var fs = new SwapSubfolderOnOpenFileSystem(new RealPurgeFileSystem(), inside, moved, junction, outside);
             using var output = new StringWriter(); using var error = new StringWriter();
             Program.RunWithPurge(new[] { dir, "/largest", "*.log", "/purge", "/minsize", "1KB", "/confirm" }, output, error, Path.Combine(dir, "purge.log"), fs);
-            Assert.Contains("[skipped: outside target]", output.ToString()); Assert.True(File.Exists(outsideFile)); Assert.True(File.Exists(Path.Combine(moved, "big.log")));
+            Assert.Contains("[skipped: changed since scan (id)]", output.ToString()); Assert.True(File.Exists(outsideFile)); Assert.True(File.Exists(Path.Combine(moved, "big.log")));
 
             var control = Scratch();
             try
