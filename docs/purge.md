@@ -204,13 +204,13 @@ held files: N (other: N)
 Delete lists are UTF-8 encoded text files with CRLF line endings:
 
 ```tsv
-# dirused delete list v2
-# purge days=1 minsize=1073741824
-# tool version=0.0.24
+# dirused delete list v3
+# purge days=1 minsize=1GB
+# tool version=0.0.25
 # created=2026-11-20 08:08:16.0126039 -08:00
 # args=\\server\d$\logs /largest *.log /purge /savelist list.txt
-# target	volumeSerial	fileId	bytes	lastWrite	path
-\\server\d$\logs	12345678	0000000012345678	104857600	2026-11-10 04:00:00.0000000 -08:00	\\server\d$\logs\app.log
+# target	volumeSerial	fileId	bytes	size	lastWrite	path
+\\server\d$\logs	12345678	0000000012345678	104857600	100M	2026-11-10 04:00:00.0000000 -08:00	\\server\d$\logs\app.log
 ```
 
 Lines starting with `#` are headers or comments. Fields are separated by a single tab (`\t`):
@@ -218,10 +218,13 @@ Lines starting with `#` are headers or comments. Fields are separated by a singl
 2. `volumeSerial`: 8-digit hexadecimal volume serial number.
 3. `fileId`: 16-digit hexadecimal 64-bit NTFS file identifier.
 4. `bytes`: Logical file size in bytes.
-5. `lastWrite`: Modification time converted to the machine's local time zone with explicit offset (`yyyy-MM-dd HH:mm:ss.fffffff zzz`), readable at a glance. The 7-digit sub-second fraction is retained because `/fromlist` compares times exactly against current file state down to the tick.
-6. `path`: Full path to candidate file.
+5. `size`: Display-only human-readable file size (e.g. `138G`, `100M`, `512B`). `/fromlist` checks `bytes` against current file state, not this column.
+6. `lastWrite`: Modification time converted to the machine's local time zone with explicit offset (`yyyy-MM-dd HH:mm:ss.fffffff zzz`), readable at a glance. The 7-digit sub-second fraction is retained because `/fromlist` compares times exactly against current file state down to the tick.
+7. `path`: Full path to candidate file.
 
-Rows where `Purge.IsWouldDelete(status)` is true (`would delete` or `would delete after stopping <service>`) and that possess a valid NTFS identity are written by `/savelist`. Legacy v1 delete lists (`# dirused delete list v1` with UTC `lastWriteUtc` in ISO 8601 `"O"` format) are also accepted and read by `/fromlist`.
+The purge line writes `minsize` using the largest exact unit (`1GB`, `1536MB`, `100MB`, `4KB`, or `B` if not an exact multiple of 1024).
+
+Rows where `Purge.IsWouldDelete(status)` is true (`would delete` or `would delete after stopping <service>`) and that possess a valid NTFS identity are written by `/savelist`. Legacy v1 (`# dirused delete list v1` with UTC `lastWriteUtc` in ISO 8601 `"O"` format) and v2 (`# dirused delete list v2` with raw byte `minsize` and 6 columns) delete lists are also accepted and read by `/fromlist`.
 
 ---
 

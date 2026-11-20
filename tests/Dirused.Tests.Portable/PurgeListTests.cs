@@ -16,8 +16,8 @@ public sealed class PurgeListTests
     {
         var dir=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);var path=Path.Combine(dir,"delete.txt");
         try { var good=Row("good");var absent=Row("absent",serial:0);var skipped=Row("skip") with {PurgeStatus="skipped: changed"};var r=Result(good with {PurgeStatus="would delete"},absent with {PurgeStatus="would delete"},skipped);var summary=PurgeList.Summarize(new[]{r});Assert.Equal(1,summary.SavedFiles);Assert.Equal(1,summary.NoIdFiles);
-            PurgeList.Write(path,new[]{r},7,1024,"test",new[]{"/largest","*.log","/purge","7"});var lines=File.ReadAllLines(path);Assert.StartsWith("# dirused delete list v2",lines[0]);Assert.Equal("# purge days=7 minsize=1024",lines[1]);Assert.Single(lines.Skip(6));Assert.Contains("good",lines[6]);
-            PurgeList.Write(path,new[]{Result()},7,1024,"test",Array.Empty<string>());var empty=File.ReadAllLines(path);Assert.Equal("# purge days=7 minsize=1024",empty[1]);Assert.All(empty,l=>Assert.StartsWith("#",l.TrimStart('\uFEFF')));
+            PurgeList.Write(path,new[]{r},7,1024,"test",new[]{"/largest","*.log","/purge","7"});var lines=File.ReadAllLines(path);Assert.StartsWith("# dirused delete list v3",lines[0]);Assert.Equal("# purge days=7 minsize=1KB",lines[1]);Assert.Single(lines.Skip(6));Assert.Contains("good",lines[6]);
+            PurgeList.Write(path,new[]{Result()},7,1024,"test",Array.Empty<string>());var empty=File.ReadAllLines(path);Assert.Equal("# purge days=7 minsize=1KB",empty[1]);Assert.All(empty,l=>Assert.StartsWith("#",l.TrimStart('\uFEFF')));
         } finally {Directory.Delete(dir,true);}
     }
 
@@ -90,7 +90,7 @@ public sealed class PurgeListTests
     { var changed=Row("changed");var peer=Row("peer",id:changed.FileId!.Value+1);var fs=new ListFs();fs.OpenInfos[changed.Path]=Info(changed,id:changed.FileId!.Value+2);fs.OpenInfos[peer.Path]=Info(peer);var run=Purge.Apply(new[]{Result(changed with{FromList=true},peer with{FromList=true})},1,1,true,fs,()=>DateTime.UtcNow,_=>{},CancellationToken.None);Assert.Equal("skipped: file changed since list (id)",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal("deleted",run.Results[0].Largest!.Files[1].PurgeStatus);Assert.Equal(1,fs.Deletes);}
 
     [Fact] public void N1_NullHandleFileIndexFailsSafe()
-    { var bad=Row("changed");var peer=Row("peer",id:bad.FileId!.Value+1);var fs=new ListFs();fs.OpenInfos[bad.Path]=new PurgeFileInfo(bad.Path,bad.LogicalBytes,Old,false,false,1){VolumeSerial=bad.VolumeSerial};fs.OpenInfos[peer.Path]=Info(peer);var run=Purge.Apply(new[]{Result(bad with{FromList=true},peer with{FromList=true})},1,1,true,fs,()=>DateTime.UtcNow,_=>{},CancellationToken.None);Assert.Equal("skipped: file changed since list (id)",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal("deleted",run.Results[0].Largest!.Files[1].PurgeStatus);Assert.Equal(1,fs.Deletes);}
+    { var bad=Row("changed");var peer=Row("peer",id:bad.FileId!.Value+1);var fs=new ListFs();fs.OpenInfos[bad.Path]=new PurgeFileInfo(bad.Path,bad.LogicalBytes,Old,false,false,1){VolumeSerial=bad.VolumeSerial};fs.OpenInfos[peer.Path]=Info(peer);var run=Purge.Apply(new[]{Result(bad with{FromList=true},peer with{FromList=true})},1,1,true,fs,()=>DateTime.UtcNow,_=>{},CancellationToken.None);Assert.Equal("skipped: file changed since list (id)",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal("deleted",run.Results[0].Largest!.Files[1].PurgeStatus);}
 
     [Fact] public void M2_ConfirmUsesOpenedHandleIdentityAndListThresholds()
     { var f=Row("listed",bytes:500_000_000);var fs=new ListFs();fs.OpenInfos[f.Path]=Info(f);fs.OpenInfos[f.Path+"#verify"]=new PurgeFileInfo(f.Path,0,Old,false,false,1);var res=Result(f with{FromList=true});var run=Purge.Apply(new[]{res},1,100_000_000,true,fs,()=>DateTime.UtcNow,_=>{},CancellationToken.None);Assert.Equal("deleted",run.Results[0].Largest!.Files[0].PurgeStatus);Assert.Equal(1,fs.Deletes); }
@@ -134,7 +134,7 @@ public sealed class PurgeListTests
     }
 
     [Fact]
-    public void M1_WritesV2HeaderCreatedColumnAndLocalTimeWithOffset()
+    public void M1_WritesV3HeaderCreatedColumnSizeAndLocalTimeWithOffset()
     {
         var zone = TimeZoneInfo.CreateCustomTimeZone("UTC-08", TimeSpan.FromHours(-8), "UTC-08", "UTC-08");
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -147,14 +147,64 @@ public sealed class PurgeListTests
             var r = Result(file);
             PurgeList.Write(path, new[] { r }, 7, 1024, "v0.0.24", new[] { "/largest", "*.log", "/purge" }, zone);
             var lines = File.ReadAllLines(path);
-            Assert.Equal("# dirused delete list v2", lines[0]);
-            Assert.Equal("# purge days=7 minsize=1024", lines[1]);
+            Assert.Equal("# dirused delete list v3", lines[0]);
+            Assert.Equal("# purge days=7 minsize=1KB", lines[1]);
             Assert.Equal("# tool version=v0.0.24", lines[2]);
             Assert.StartsWith("# created=", lines[3]);
             Assert.EndsWith("-08:00", lines[3]);
             Assert.Equal("# args=/largest *.log /purge", lines[4]);
-            Assert.Equal("# target\tvolumeSerial\tfileId\tbytes\tlastWrite\tpath", lines[5]);
-            Assert.Contains("2026-11-20 08:08:16.0126039 -08:00", lines[6]);
+            Assert.Equal("# target\tvolumeSerial\tfileId\tbytes\tsize\tlastWrite\tpath", lines[5]);
+            Assert.Contains("500000000\t477M\t2026-11-20 08:08:16.0126039 -08:00\tC:\\logs\\file.log", lines[6]);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Theory]
+    [InlineData(1073741824L, "1GB")]
+    [InlineData(1610612736L, "1536MB")]
+    [InlineData(104857600L, "100MB")]
+    [InlineData(4096L, "4KB")]
+    [InlineData(1000L, "1000B")]
+    public void M1_WritesExpectedMinSizeSpelling(long minBytes, string expected)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "delete.txt");
+        try
+        {
+            var file = Row("large.log", bytes: 147999209735L) with { PurgeStatus = "would delete" };
+            PurgeList.Write(path, new[] { Result(file) }, 1, minBytes, "v0.0.25", Array.Empty<string>());
+            var lines = File.ReadAllLines(path);
+            Assert.Equal("# dirused delete list v3", lines[0]);
+            Assert.Equal($"# purge days=1 minsize={expected}", lines[1]);
+            Assert.Equal("# target\tvolumeSerial\tfileId\tbytes\tsize\tlastWrite\tpath", lines[5]);
+            Assert.Contains("147999209735\t138G\t", lines[6]);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Theory]
+    [InlineData(1073741824L, 147999209735L)]
+    [InlineData(1610612736L, 2000000000L)]
+    [InlineData(104857600L, 500000000L)]
+    [InlineData(4096L, 10000L)]
+    [InlineData(1000L, 5000L)]
+    public void M2_V3RoundTripPreservesExactMinBytesAndLogicalBytes(long minBytes, long fileBytes)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "delete.txt");
+        try
+        {
+            var file = Row("roundtrip.log", bytes: fileBytes) with { PurgeStatus = "would delete" };
+            PurgeList.Write(path, new[] { Result(file) }, 3, minBytes, "v0.0.25", Array.Empty<string>());
+            Assert.True(PurgeList.Read(path, out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Empty(parsed.Errors);
+            Assert.Equal(3, parsed.Days);
+            Assert.Equal(minBytes, parsed.MinBytes);
+            Assert.Single(parsed.Files);
+            Assert.Equal(fileBytes, parsed.Files[0].LogicalBytes);
         }
         finally { Directory.Delete(dir, true); }
     }
@@ -225,6 +275,74 @@ public sealed class PurgeListTests
     }
 
     [Fact]
+    public void M3_ReadsV2ListWithNumericMinSizeAnd6Columns()
+    {
+        var valid = Row("valid-v2", bytes: 104857600L);
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, $"{PurgeList.HeaderV2}\r\n# purge days=1 minsize=1073741824\r\n"
+                + $"C:\\logs\t{valid.VolumeSerial:X8}\t{valid.FileId:X16}\t{valid.LogicalBytes}\t2026-11-20 08:08:16.0126039 -08:00\t{valid.Path}\r\n"
+                + $"C:\\logs\t12345678\t0000000000000001\t1\t2026-11-20T16:08:16.0126039Z\tbad-v1-time-in-v2\r\n");
+            Assert.True(PurgeList.Read(p, out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Equal(1073741824L, parsed.MinBytes);
+            Assert.Single(parsed.Files);
+            Assert.Equal(valid.Path, parsed.Files[0].Path);
+            Assert.Equal(valid.LogicalBytes, parsed.Files[0].LogicalBytes);
+            Assert.Single(parsed.Errors);
+            Assert.Equal("bad modification time", parsed.Errors[0].Reason);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Fact]
+    public void N1_SizeColumnIsDisplayOnlyAndBytesDeterminesLogicalBytes()
+    {
+        var f1 = Row("mismatch.log", id: 0x1111111111111111, bytes: 147999209735L);
+        var f2 = Row("match.log", id: 0x2222222222222222, bytes: 147999209735L);
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, $"{PurgeList.Header}\r\n# purge days=1 minsize=1GB\r\n"
+                + $"C:\\logs\t{f1.VolumeSerial:X8}\t{f1.FileId:X16}\t{f1.LogicalBytes}\t1K\t2026-11-20 08:08:16.0126039 -08:00\t{f1.Path}\r\n"
+                + $"C:\\logs\t{f2.VolumeSerial:X8}\t{f2.FileId:X16}\t{f2.LogicalBytes}\t138G\t2026-11-20 08:08:16.0126039 -08:00\t{f2.Path}\r\n");
+            Assert.True(PurgeList.Read(p, out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Empty(parsed.Errors);
+            Assert.Equal(2, parsed.Files.Count);
+            Assert.Equal(147999209735L, parsed.Files[0].LogicalBytes);
+            Assert.Equal(147999209735L, parsed.Files[1].LogicalBytes);
+            Assert.Equal(parsed.Files[0].LogicalBytes, parsed.Files[1].LogicalBytes);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Theory]
+    [InlineData("minsize=1.5GB", false, 0L)]
+    [InlineData("minsize=0GB", false, 0L)]
+    [InlineData("minsize=1XB", false, 0L)]
+    [InlineData("minsize=1073741824", false, 0L)]
+    [InlineData("minsize=1GB", true, 1073741824L)]
+    [InlineData("minsize=1000B", true, 1000L)]
+    public void N2_RejectsMalformedV3PurgeLineAndAcceptsValidUnits(string minsizePart, bool expectedSuccess, long expectedBytes)
+    {
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, $"{PurgeList.Header}\r\n# purge days=1 {minsizePart}\r\n");
+            bool ok = PurgeList.Read(p, out var parsed);
+            Assert.Equal(expectedSuccess, ok);
+            if (expectedSuccess)
+            {
+                Assert.NotNull(parsed);
+                Assert.Equal(expectedBytes, parsed.MinBytes);
+            }
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Fact]
     public void N2_RejectsMalformedV2TimesWhileReadingValidPeers()
     {
         var valid = Row("valid");
@@ -232,7 +350,7 @@ public sealed class PurgeListTests
         var p = Path.GetTempFileName();
         try
         {
-            File.WriteAllText(p, $"{PurgeList.Header}\r\n# purge days=1 minsize=1\r\n"
+            File.WriteAllText(p, $"{PurgeList.HeaderV2}\r\n# purge days=1 minsize=1\r\n"
                 + $"{Make("2026-11-20T16:08:16.0126039Z", "v1-in-v2.log")}\r\n"
                 + $"{Make("2026-11-20 08:08:16.0126039", "no-offset.log")}\r\n"
                 + $"{Make("2026-11-20 08:08:16 -08:00", "no-fraction.log")}\r\n"
@@ -247,8 +365,29 @@ public sealed class PurgeListTests
         finally { File.Delete(p); }
     }
 
+    [Fact]
+    public void N3_RejectsV3RowWith6FieldsOrEmptySizeWhileReadingValidPeer()
+    {
+        var valid = Row("valid.log", id: 0x3333333333333333, bytes: 147999209735L);
+        var p = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(p, $"{PurgeList.Header}\r\n# purge days=1 minsize=1GB\r\n"
+                + $"C:\\logs\t12345678\t0000000000000001\t100\t2026-11-20 08:08:16.0126039 -08:00\tC:\\logs\\six-fields.log\r\n"
+                + $"C:\\logs\t12345678\t0000000000000002\t200\t\t2026-11-20 08:08:16.0126039 -08:00\tC:\\logs\\empty-size.log\r\n"
+                + $"C:\\logs\t{valid.VolumeSerial:X8}\t{valid.FileId:X16}\t{valid.LogicalBytes}\t138G\t2026-11-20 08:08:16.0126039 -08:00\t{valid.Path}\r\n");
+            Assert.True(PurgeList.Read(p, out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Single(parsed.Files);
+            Assert.Equal(valid.Path, parsed.Files[0].Path);
+            Assert.Equal(valid.LogicalBytes, parsed.Files[0].LogicalBytes);
+            Assert.Equal(2, parsed.Errors.Count);
+        }
+        finally { File.Delete(p); }
+    }
+
     [Theory]
-    [InlineData("# dirused delete list v3", false)]
+    [InlineData("# dirused delete list v4", false)]
     [InlineData("# dirused delete list v0", false)]
     [InlineData("# dirused delete list v1", true)]
     [InlineData("# dirused delete list v2", true)]
