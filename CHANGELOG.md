@@ -16,6 +16,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 - `/version` and `/noupdatecheck`.
 
 ### Changed
+- The delete list (`/savelist`) format is updated to v3 (`# dirused delete list v3`): the purge header writes minsize in human-readable units (e.g. `minsize=1GB`, `minsize=1536MB`, `minsize=1000B`), and rows include a display-only `size` column (e.g. `138G`) after `bytes`. `/fromlist` continues to verify exact byte counts against `bytes` and accepts legacy v1 and v2 lists.
 - The delete list (`/savelist`) format is updated to v2 (`# dirused delete list v2`): modification times and `# created=` use local time with explicit offset and 7-digit subsecond fraction (`yyyy-MM-dd HH:mm:ss.fffffff zzz`), readable at a glance without manual time zone conversion. `/fromlist` reads both v2 and legacy v1 lists and preserves exact UTC ticks.
 - `/confirm` now checks NTFS volume serial and file ID for scan rows (`skipped: changed since scan (id)`) before deletion.
 - D1 age exemption: held Tomcat redirect logs are exempt from the purge age rule.
