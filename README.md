@@ -80,7 +80,7 @@ In the HTML report, files of 10 GB or more are red, 1 GB or more amber, and each
 
 ### Purging listed files
 
-`/purge [days]` acts only on the files shown by `/largest [<patterns>]`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files. Purge dry runs work without `/largest` patterns; only `/confirm` requires explicit, non-match-all file patterns. Text and HTML output do not list files smaller than `/minsize`; lower `/minsize` to see them; JSON and CSV list every file.
+`/purge [days]` acts only on the files shown by `/largest [<patterns>]`, skips files modified within the requested age (default: 1 day), and selects files at least `/minsize` large (default: 1 GB). `/purge` alone is a dry run and reports what would be deleted. Add `/confirm` to permanently delete eligible files. Purge dry runs work without `/largest` patterns; only `/confirm` requires explicit, non-match-all file patterns. Text and HTML output do not list files smaller than `/minsize`; lower `/minsize` to see them; JSON and CSV list every file. See [docs/purge.md](docs/purge.md) for the full decision tree, in-use file detection, service classification, exit codes, and file formats.
 
 The help describes the switches this way:
 

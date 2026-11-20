@@ -17,9 +17,11 @@ public static class Program
     public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
     public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares) => RunCore(args, output, error, nodeShares, null, "0.0.0-dev");
     public static int RunWithReleaseSource(string[] args, TextWriter output, TextWriter error, IReleaseSource source, string version, string? updateStatePath = null) => RunCore(args, output, error, null, source, version, updateStatePath);
-    public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs);
-    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null)
+    public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs, services, isFixedDrive);
+    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null)
     {
+        IServiceQuery? effectiveServices = services ?? (OperatingSystem.IsWindows() ? new RealServiceQuery() : null);
+        Func<string, bool>? effectiveFixedDrive = isFixedDrive;
         if (source != null) CleanupUpdateFiles();
         if (args.Length == 1 && ArgParser.IsFlag(args[0], "version")) { output.WriteLine($"dirused {version} ({System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier})"); return 0; }
         if (args.Any(a => ArgParser.IsFlag(a, "update")))
@@ -63,7 +65,7 @@ public static class Program
             if (options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
             if (!PurgeList.Read(options.FromList, out var parsedList)) { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
             if (!OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
-            return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs);
+            return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs, effectiveServices, effectiveFixedDrive);
         }
         if (options.Purge && !OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
         if (options.Purge && options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
@@ -109,7 +111,7 @@ public static class Program
             PurgeRun? purgeRun = null;
             if (options.Purge)
             {
-                purgeRun = Purge.Apply(results, options.PurgeDays, options.PurgeMinBytes, options.Confirm, purgeFs ?? new RealPurgeFileSystem(), () => DateTime.UtcNow, options.Confirm ? line => purgeLog!.WriteLine(line) : null, cts.Token, effectivePurgeLog);
+                purgeRun = Purge.Apply(results, options.PurgeDays, options.PurgeMinBytes, options.Confirm, purgeFs ?? new RealPurgeFileSystem(), () => DateTime.UtcNow, options.Confirm ? line => purgeLog!.WriteLine(line) : null, cts.Token, effectivePurgeLog, effectiveServices, effectiveFixedDrive);
                 results = purgeRun.Results.ToList();
             }
             IRenderer renderer = options.Format switch
@@ -137,6 +139,22 @@ public static class Program
                 error.WriteLine($"HTML report: {reportPath}");
             }
             else if (fileWriter != null) error.WriteLine($"Report: {reportPath}");
+            if (!options.Confirm && purgeRun?.ProbeFailures > 0)
+            {
+                error.WriteLine($"in-use check failed for {purgeRun.ProbeFailures} file(s): {purgeRun.FirstProbeError}");
+            }
+            if (purgeRun?.HeldSummary != null && purgeRun.HeldSummary.Total > 0)
+            {
+                var h = purgeRun.HeldSummary;
+                if (h.TomcatCount > 0 && h.Service != null)
+                {
+                    output.WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
+                }
+                else
+                {
+                    output.WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
+                }
+            }
             if (options.SaveList != null && purgeRun != null)
             {
                 try { var summary=PurgeList.Summarize(results); PurgeList.Write(options.SaveList, results, options.PurgeDays, options.PurgeMinBytes, version, args); if(summary.NoIdFiles>0) error.WriteLine($"{summary.NoIdFiles} file(s) not saved: no file ID (server does not report one)"); error.WriteLine(summary.SavedFiles==0?"delete list saved: 0 file(s)":$"delete list saved: {summary.SavedFiles} file(s), {Format.Size(summary.SavedBytes)} -> {options.SaveList}"); }
@@ -166,7 +184,7 @@ public static class Program
         }
     }
 
-    private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs)
+    private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null)
     {
         var results=list.Files.GroupBy(f=>f.ListTarget??Path.GetDirectoryName(f.Path)??f.Path,StringComparer.OrdinalIgnoreCase).Select(g=>new ScanResult(g.Key,new Volume("",0,0,0,0),new(),new(),new(),true){ScanRoot=g.Key,Largest=new LargestFiles(Array.Empty<string>(),g.Count(),g.Sum(x=>x.LogicalBytes),g.ToList(),true)}).ToList();
         StreamWriter? log=null; StreamWriter? report=null; string reportPath="";
@@ -177,10 +195,26 @@ public static class Program
             if(options.Confirm){try { Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(logPath))!);log=new StreamWriter(new FileStream(logPath,FileMode.Append,FileAccess.Write,FileShare.Read)){AutoFlush=true}; } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException or NotSupportedException) { error.WriteLine($"Cannot open purge log '{logPath}': {ex.Message}; nothing was deleted"); return 1; }}
             TextWriter destination=output;
             if(options.Output!=null){if(!ReportOutput.TryOpen(options.Output,out report,out reportPath,out var openError)){error.WriteLine(openError);return 1;} if(!options.Html)destination=report!;}
-            var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),()=>DateTime.UtcNow,options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
+            var run=Purge.Apply(results,list.Days,list.MinBytes,options.Confirm,fs??new RealPurgeFileSystem(),()=>DateTime.UtcNow,options.Confirm?x=>log!.WriteLine(x):null,cts.Token,logPath,services,isFixedDrive) with { ListErrors=list.Errors.Count, BadListLines=list.Errors };
             IRenderer renderer=options.Format switch {OutputFormat.Json=>new JsonRenderer(false),OutputFormat.Csv=>new CsvRenderer(false,85,90,true),_=>new TextRenderer()};
             renderer.Render(destination,run.Results);
             if(options.Html){new HtmlRenderer(false,85,90,50).Render(report!,run.Results);error.WriteLine($"HTML report: {reportPath}");} else if(report!=null)error.WriteLine($"Report: {reportPath}");
+            if (!options.Confirm && run.ProbeFailures > 0)
+            {
+                error.WriteLine($"in-use check failed for {run.ProbeFailures} file(s): {run.FirstProbeError}");
+            }
+            if (run.HeldSummary != null && run.HeldSummary.Total > 0)
+            {
+                var h = run.HeldSummary;
+                if (h.TomcatCount > 0 && h.Service != null)
+                {
+                    output.WriteLine($"held files: {h.Total} (Tomcat: {h.Service} on {h.Host}, root {h.InstallRoot}: {h.TomcatCount} file(s), {Format.Size(h.TomcatBytes)}; other: {h.OtherCount})");
+                }
+                else
+                {
+                    output.WriteLine($"held files: {h.Total} (other: {h.OtherCount})");
+                }
+            }
             if(run.ListErrors>0){error.WriteLine("Bad list lines:");foreach(var e in run.BadListLines)error.WriteLine($"  line {e.Line}: {e.Reason}");}
             error.WriteLine(options.Confirm?$"Purge: deleted {run.Deleted} file(s), {Format.Size(run.DeletedBytes)} freed; {run.Skipped} skipped; {run.Failed} failed; {run.NotAttempted} not attempted. Log: {logPath}":$"Purge dry run: {run.WouldDelete} file(s), {Format.Size(run.WouldDeleteBytes)} would be deleted; {run.Skipped} skipped" + (run.Failed == 0 ? "" : $"; {run.Failed} could not be checked") + ".");
             return run.ListErrors>0||run.Failed>0||run.NotAttempted>0?3:0;

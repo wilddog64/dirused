@@ -101,6 +101,38 @@ public sealed class PurgeListTests
     [Fact] public void M7_ParserEnforcesFromListSwitchContract()
     { const string message="/fromlist can only be combined with /purge, /confirm, /html, /output, /json and /csv";foreach(var arg in new[]{new[]{"/fromlist","f","/purge",@"C:\logs"},new[]{"/fromlist","f","/purge","/file","x"},new[]{"/fromlist","f","/purge","/largest","*.log"},new[]{"/fromlist","f","/purge","1"},new[]{"/fromlist","f","/purge","/minsize","1MB"},new[]{"/fromlist","f","/purge","/timeout","2"},new[]{"/fromlist","f","/purge","/savelist","x"}})Assert.Equal(message,ArgParser.Parse(arg).Error);Assert.Equal("/fromlist requires /purge",ArgParser.Parse(new[]{"/fromlist","f"}).Error);Assert.Null(ArgParser.Parse(new[]{"/fromlist","f","/purge"}).Error);Assert.Equal("/savelist requires /purge",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/savelist","f"}).Error);Assert.Equal("/savelist cannot be used with /confirm",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/purge","/confirm","/savelist","f"}).Error);Assert.Equal("/savelist cannot be used with /summary",ArgParser.Parse(new[]{@"C:\x","/largest","*.log","/purge","/summary","/savelist","f"}).Error); }
 
+    [Fact]
+    public void M6_SaveListWritesWouldDeleteAfterStoppingRowsAndRoundTrips()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "delete.txt");
+        try
+        {
+            var f1 = Row("stopping.log") with { PurgeStatus = "would delete after stopping tomcat85" };
+            var f2 = new LargestFile(@"D:\data\held.log", 300_000_000, Old) { VolumeSerial = 0x87654321, FileId = 0xFEDCBA9876543210, PurgeStatus = "would delete after stopping tomcat9" };
+            var r1 = Result(f1);
+            var r2 = new ScanResult(@"D:\data", new Volume("D:", 0, 0, 0, 0), new(), new(), new(), true) { ScanRoot = @"D:\data", Largest = new LargestFiles(Array.Empty<string>(), 1, f2.LogicalBytes, new List<LargestFile> { f2 }, true) };
+
+            var summary = PurgeList.Summarize(new[] { r1, r2 });
+            Assert.Equal(2, summary.SavedFiles);
+            Assert.Equal(0, summary.NoIdFiles);
+            Assert.Equal(f1.LogicalBytes + f2.LogicalBytes, summary.SavedBytes);
+
+            PurgeList.Write(path, new[] { r1, r2 }, 1, 1024, "v0.0.23", new[] { "/largest", "*.log", "/purge" });
+
+            Assert.True(PurgeList.Read(path, out var parsed));
+            Assert.NotNull(parsed);
+            Assert.Equal(2, parsed.Files.Count);
+            Assert.Empty(parsed.Errors);
+            Assert.Equal(@"C:\logs", parsed.Files[0].ListTarget);
+            Assert.Equal(f1.Path, parsed.Files[0].Path);
+            Assert.Equal(@"D:\data", parsed.Files[1].ListTarget);
+            Assert.Equal(f2.Path, parsed.Files[1].Path);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     private sealed class ListFs:IPurgeFileSystem
     { public Dictionary<string,PurgeFileInfo> Stats=new();public Dictionary<string,PurgeFileInfo> OpenInfos=new();public List<string> StatPaths=new(),Opens=new();public int StatCalls,Deletes;private readonly HashSet<string> opened=new();public string? ResolveRoot(string p,out string? e){e=null;return p;}public PurgeFileInfo? Stat(string p,out string? e,out bool missing){StatCalls++;StatPaths.Add(p);e=null;missing=false;return Stats.GetValueOrDefault(p);}public PurgeOpen Open(string p){Opens.Add(p);if(!opened.Add(p))return new PurgeOpen("gone",true);if(!OpenInfos.TryGetValue(p,out var info))info=Stats.GetValueOrDefault(p)!;return new PurgeOpen(info,new Handle(()=>{}),()=>Deletes++);}private sealed class Handle(Action close):IDisposable{public void Dispose()=>close();} }
 }
