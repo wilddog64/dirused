@@ -194,7 +194,7 @@ public static class Program
 
     private static int RunFromList(Options options, ParsedPurgeList list, TextWriter output, TextWriter error, string logPath, IPurgeFileSystem? fs, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool inputRedirected = false, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null)
     {
-        var results=list.Files.GroupBy(f=>f.ListTarget??Path.GetDirectoryName(f.Path)??f.Path,StringComparer.OrdinalIgnoreCase).Select(g=>new ScanResult(g.Key,new Volume("",0,0,0,0),new(),new(),new(),true){ScanRoot=g.Key,Largest=new LargestFiles(Array.Empty<string>(),g.Count(),g.Sum(x=>x.LogicalBytes),g.ToList(),true)}).ToList();
+        var results = PurgeList.ToResults(list);
         StreamWriter? log=null; StreamWriter? report=null; string reportPath="";
         using var cts = new CancellationTokenSource();
         ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; cts.Cancel(); };

@@ -10,6 +10,14 @@ public sealed record ParsedPurgeList(int Days, long MinBytes, IReadOnlyList<Larg
 public sealed record PurgeListSaveSummary(int SavedFiles, long SavedBytes, int NoIdFiles);
 public static class PurgeList
 {
+    public static List<ScanResult> ToResults(ParsedPurgeList list) => list.Files
+        .GroupBy(f => f.ListTarget ?? Path.GetDirectoryName(f.Path) ?? f.Path, StringComparer.OrdinalIgnoreCase)
+        .Select(g => new ScanResult(g.Key, new Volume("", 0, 0, 0, 0), new(), new(), new(), true)
+        {
+            ScanRoot = g.Key,
+            Largest = new LargestFiles(Array.Empty<string>(), g.Count(), g.Sum(x => x.LogicalBytes), g.ToList(), true)
+        }).ToList();
+
     public static PurgeListSaveSummary Summarize(IEnumerable<ScanResult> results)
     {
         var rows = results.SelectMany(r => r.Largest?.Files ?? new List<LargestFile>()).Where(f => Purge.IsWouldDelete(f.PurgeStatus)).ToList();

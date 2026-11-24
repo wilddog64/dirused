@@ -12,6 +12,7 @@ public interface IPlanStore
     bool IsReparsePoint(string path);
     SeamResult CreateDirectory(string path);
     SeamResult WriteNew(string path, byte[] bytes);
+    SeamResult MoveNew(string from, string to) => new(false, "move unavailable");
     byte[]? ReadAll(string path);
     IReadOnlyList<string> ListDirectoryNames(string path);
     SeamResult DeleteTree(string path);
