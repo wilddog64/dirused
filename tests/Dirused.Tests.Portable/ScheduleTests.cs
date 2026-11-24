@@ -30,7 +30,7 @@ public class ScheduleTests
             "  Held:     not checked now; files held open at run time are skipped",
             "It runs only while you are logged on to this machine (disconnected is fine).",
             "Preview only. Add /confirm to schedule it."
-        }, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+        }, output.ToString().Split("\n", StringSplitOptions.RemoveEmptyEntries));
         Assert.All(output.ToString().Split('\n'), line => Assert.True(line.TrimEnd('\r').Length <= 80));
     }
 
@@ -145,7 +145,7 @@ public class ScheduleTests
         string path = new('x', 150);
         using var output = Writer(); using var error = Writer();
         Assert.Equal(0, Schedule.Run(options, List(@"C:\a"), path, output, error, () => MondayNow, Pacific()));
-        var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        var lines = output.ToString().Split("\n", StringSplitOptions.RemoveEmptyEntries);
         var pathLines = lines.Where(l => l.StartsWith("  List:     ") || l.StartsWith("            ")).Take(3).ToArray();
         Assert.Equal("  List:     " + path[..68], pathLines[0]);
         Assert.Equal("            " + path.Substring(68, 68), pathLines[1]);
@@ -156,7 +156,7 @@ public class ScheduleTests
         output.GetStringBuilder().Clear(); error.GetStringBuilder().Clear();
         Assert.Equal(3, Schedule.Run(options, badList, "l", output, error, () => MondayNow, Pacific()));
         Assert.Contains("Preview only. Add /confirm to schedule it.", output.ToString());
-        Assert.Equal("Bad list lines:" + Environment.NewLine + "  line 4: bad size" + Environment.NewLine + "  line 8: bad file ID" + Environment.NewLine, error.ToString());
+        Assert.Equal("Bad list lines:" + "\n" + "  line 4: bad size" + "\n" + "  line 8: bad file ID" + "\n", error.ToString());
         var confirm = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/confirm" }).Options!;
         output.GetStringBuilder().Clear(); error.GetStringBuilder().Clear();
         Assert.Equal(1, Schedule.Run(confirm, badList, "l", output, error, () => MondayNow, Pacific()));
@@ -206,7 +206,7 @@ public class ScheduleTests
         using var output = Writer(); using var error = Writer();
         Assert.Equal(1, Schedule.Run(options, List(@"C:\a"), "l", output, error, () => now, local));
         Assert.Empty(output.ToString());
-        Assert.Equal(expected + Environment.NewLine, error.ToString());
+        Assert.Equal(expected + "\n", error.ToString());
     }
 
     private static (string Name, long Size, DateTime Modified)[] Snapshot(string directory) => Directory.GetFileSystemEntries(directory)
