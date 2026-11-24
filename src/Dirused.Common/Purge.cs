@@ -111,7 +111,8 @@ public static class Purge
         TextReader? input = null,
         bool inputRedirected = false,
         bool yes = false,
-        TextWriter? error = null)
+        TextWriter? error = null,
+        bool scheduled = false)
     {
         localNow ??= () => DateTime.Now;
         sleep ??= t => Thread.Sleep(t);
@@ -239,7 +240,7 @@ public static class Purge
                                 wouldBytes += file.LogicalBytes;
                                 targetBytes += file.LogicalBytes;
                             }
-                            else if (confirm && control != null && classification.Reason == "tomcat")
+                            else if (confirm && (control != null || scheduled) && classification.Reason == "tomcat")
                             {
                                 heldBackRows.Add(new HeldBackRow
                                 {
@@ -412,7 +413,7 @@ public static class Purge
                 }
                 else
                 {
-                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot, confirm && control != null, out var heldBack);
+                    status = ProcessFile(file, targetFinal, fs, utcNow, log, ref stopReason, out long freed, services, isFixedDrive, serviceCache, ref heldTotal, ref heldTomcatCount, ref heldTomcatBytes, ref heldOtherCount, ref heldService, ref heldHost, ref heldInstallRoot, confirm && (control != null || scheduled), out var heldBack);
                     if (status == null && heldBack.HasValue)
                     {
                         heldBackRows.Add(new HeldBackRow
@@ -487,6 +488,17 @@ public static class Purge
                 {
                     AssignStatus(row, st);
                     notAttempted++;
+                }
+                continue;
+            }
+
+            if (scheduled)
+            {
+                string st = $"skipped: held by {group.ServiceKey} — scheduled runs do not stop services";
+                foreach (var row in group.Rows)
+                {
+                    AssignStatus(row, st);
+                    skipped++;
                 }
                 continue;
             }

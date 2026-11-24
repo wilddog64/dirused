@@ -32,9 +32,21 @@ public static class PurgeList
 
     public static bool Read(string path, out ParsedPurgeList? parsed)
     {
+        try { return Parse(File.ReadAllBytes(path), out parsed); }
+        catch { parsed = null; return false; }
+    }
+
+    public static bool Parse(byte[] bytes, out ParsedPurgeList? parsed)
+    {
         parsed = null;
         string[] lines;
-        try { lines = File.ReadAllLines(path, Encoding.UTF8); } catch { return false; }
+        using (var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+        {
+            var parsedLines = new List<string>();
+            string? line;
+            while ((line = reader.ReadLine()) != null) parsedLines.Add(line);
+            lines = parsedLines.ToArray();
+        }
         if (lines.Length < 2) return false;
         if (lines[0].StartsWith('\uFEFF')) lines[0] = lines[0][1..];
         bool isV3 = lines[0] == Header;
@@ -80,7 +92,7 @@ public static class PurgeList
             else if (string.IsNullOrWhiteSpace(f[0])) why = "bad target";
             else if (f[1].Length != 8 || !uint.TryParse(f[1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint serial) || serial == 0) why = "bad volume serial";
             else if (f[2].Length != 16 || !ulong.TryParse(f[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out ulong id) || id == 0 || id == ulong.MaxValue) why = "bad file ID";
-            else if (!long.TryParse(f[3], NumberStyles.None, CultureInfo.InvariantCulture, out long bytes) || bytes < 0) why = "bad size";
+            else if (!long.TryParse(f[3], NumberStyles.None, CultureInfo.InvariantCulture, out long fileBytes) || fileBytes < 0) why = "bad size";
             else if (isV3 && string.IsNullOrWhiteSpace(f[4])) why = "bad size display";
             else if (isV1 && (!DateTime.TryParseExact(f[4], "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var time) || time.Kind != DateTimeKind.Utc)) why = "bad modification time";
             else if ((isV2 || isV3) && !DateTimeOffset.TryParseExact(isV3 ? f[5] : f[4], TimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) why = "bad modification time";
