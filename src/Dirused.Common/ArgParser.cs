@@ -13,7 +13,7 @@ public static class ArgParser
     }
 
     private static bool MissingPath(string value) => string.IsNullOrWhiteSpace(value) || KnownSwitches.Any(n => IsFlag(value, n));
-    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update", "yes" };
+    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update", "yes", "schedule" };
 
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
@@ -67,6 +67,8 @@ public static class ArgParser
         "                      /minsize to see them; JSON and CSV list every file.\n" +
         "  /savelist <file>    Save the dry-run delete list\n" +
         "  /fromlist <file>    Use a saved delete list\n" +
+        "  /schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM\n" +
+        "                      [PT|PST|PDT|UTC]; add /confirm to schedule it\n" +
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
         "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
         "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +
@@ -116,9 +118,27 @@ public static class ArgParser
 
     public static ParseResult Parse(string[] args)
     {
+        var schedules = args.Select((a, i) => (a, i)).Where(x => IsFlag(x.a, "schedule")).ToList();
+        bool hasFromList = args.Any(a => IsFlag(a, "fromlist"));
+        if (schedules.Count > 1) return new(Error: "/schedule can be given only once");
+        if (schedules.Count == 1 && !hasFromList) return new(Error: "/schedule requires /fromlist");
+        string? scheduleTime = null, scheduleZone = null;
+        if (schedules.Count == 1)
+        {
+            int si = schedules[0].i;
+            if (si + 1 >= args.Length || IsFlag(args[si + 1], "schedule") || IsFlag(args[si + 1], "purge") || IsFlag(args[si + 1], "confirm") || IsFlag(args[si + 1], "yes") || args[si + 1].StartsWith('-') || (args[si + 1].StartsWith('/') && !args[si + 1].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/schedule requires a time, e.g. /schedule 22:30 PT");
+            scheduleTime = args[si + 1];
+            if (!System.Text.RegularExpressions.Regex.IsMatch(scheduleTime, @"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return new(Error: "/schedule: time must be HH:MM (00:00-23:59), optionally followed by PT, PST, PDT or UTC");
+            if (si + 2 < args.Length && !args[si + 2].StartsWith('/') && !args[si + 2].StartsWith('-'))
+            {
+                string zone = args[si + 2].ToUpperInvariant();
+                if (zone is "PT" or "PST" or "PDT" or "UTC") scheduleZone = zone;
+            }
+            if (args.Any(a => IsFlag(a, "schedule")) && (!args.Any(a => IsFlag(a, "purge")) || args.Any(a => IsFlag(a, "html") || IsFlag(a, "output") || IsFlag(a, "json") || IsFlag(a, "csv")))) return new(Error: "/schedule can only be combined with /fromlist, /purge, /confirm and /yes");
+        }
         if (args.Any(a => IsFlag(a,"fromlist")))
         {
-            const string bad = "/fromlist can only be combined with /purge, /confirm, /html, /output, /json, /csv and /yes";
+            const string bad = "/fromlist can only be combined with /purge, /confirm, /html, /output, /json, /csv, /yes and /schedule";
             string? list=null, outputPath=null; bool fromPurge=false,fromConfirm=false,htmlList=false,jsonList=false,csvList=false,fromYes=false;
             for (int j=0; j<args.Length; j++)
             {
@@ -130,13 +150,15 @@ public static class ArgParser
                 else if (IsFlag(a,"json")) jsonList=true;
                 else if (IsFlag(a,"csv")) csvList=true;
                 else if (IsFlag(a,"yes")) fromYes=true;
+                else if (IsFlag(a,"schedule")) { j++; if (j < args.Length && j + 1 < args.Length && !args[j + 1].StartsWith('/') && !args[j + 1].StartsWith('-') && (args[j + 1].ToUpperInvariant() is "PT" or "PST" or "PDT" or "UTC")) j++; }
                 else if (IsFlag(a,"output")) { if(++j>=args.Length || MissingPath(args[j])) return new(Error:"/output requires a path"); outputPath=args[j]; }
+                else if (IsFlag(a,"list") || IsFlag(a,"cancel") || IsFlag(a,"runplan")) return new(Error:$"Unknown switch: {a}");
                 else return new(Error:bad);
             }
             if(!fromPurge)return new(Error:"/fromlist requires /purge");
             if(fromYes&&(!fromPurge||!fromConfirm))return new(Error:"/yes needs /purge /confirm");
             if(list==null||jsonList&&csvList)return new(Error:bad);
-            return new(Options:new Options(Array.Empty<string>(),Format:jsonList?OutputFormat.Json:csvList?OutputFormat.Csv:OutputFormat.Text,Html:htmlList,Output:outputPath??(htmlList?DefaultHtmlPath:null),Purge:true,Confirm:fromConfirm,FromList:list,Yes:fromYes));
+            return new(Options:new Options(Array.Empty<string>(),Format:jsonList?OutputFormat.Json:csvList?OutputFormat.Csv:OutputFormat.Text,Html:htmlList,Output:outputPath??(htmlList?DefaultHtmlPath:null),Purge:true,Confirm:fromConfirm,FromList:list,Yes:fromYes,ScheduleTime:scheduleTime,ScheduleZone:scheduleZone));
         }
         var targets = new List<string>(); int top = 50; bool json = false, csv = false, html = false;
         string? output = null;

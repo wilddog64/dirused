@@ -69,6 +69,7 @@ public static class Program
             if ((options.Output != null && Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/fromlist cannot be the output or purge log"); return 1; }
             if (options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
             if (!PurgeList.Read(options.FromList, out var parsedList)) { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
+            if (options.ScheduleTime != null) return Schedule.Run(options, parsedList!, options.FromList, output, error, () => DateTimeOffset.Now, TimeZoneInfo.Local);
             if (!OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }
             return RunFromList(options, parsedList!, output, error, purgeLogPath ?? PurgeLog.DefaultPath, purgeFs, effectiveServices, effectiveFixedDrive, effectiveControl, effectiveInput, effectiveInputRedirected, effectiveLocalNow, effectiveSleep, utcNow);
         }

@@ -320,4 +320,23 @@ public class ArgParserTests
         Assert.Null(fromListOk.Error);
         Assert.True(fromListOk.Options!.Yes);
     }
+
+    [Fact]
+    public void M10b0_ScheduleParserRulesAndUsage()
+    {
+        Assert.Equal("/schedule can be given only once", ArgParser.Parse(new[] { "/schedule", "22:30", "/schedule", "23:00" }).Error);
+        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
+        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Error);
+        Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule" }).Error);
+        foreach (var token in new[] { "/html", "-x", "/bogus" })
+            Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", token }).Error);
+        Assert.Equal("/schedule: time must be HH:MM (00:00-23:59), optionally followed by PT, PST, PDT or UTC", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "9:00" }).Error);
+        Assert.Equal("/schedule can only be combined with /fromlist, /purge, /confirm and /yes", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/html" }).Error);
+        Assert.Equal("/yes needs /purge /confirm", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/yes" }).Error);
+        var valid = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "pst" });
+        Assert.Equal("PST", valid.Options!.ScheduleZone);
+        Assert.Contains("  /schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM\n", ArgParser.UsageText);
+        Assert.Contains("                      [PT|PST|PDT|UTC]; add /confirm to schedule it\n", ArgParser.UsageText);
+        Assert.DoesNotContain("/schedule", ArgParser.ShortUsageText);
+    }
 }
