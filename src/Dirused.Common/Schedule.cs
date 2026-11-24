@@ -5,6 +5,7 @@ namespace Dirused.Common;
 
 public static class Schedule
 {
+    public static string? NotAvailableForm(Options o) => o.RunPlan != null ? "/runplan" : o.ScheduleList ? "/schedule /list" : o.ScheduleCancelId != null ? "/schedule /cancel" : o.ScheduleTrust ? "/schedule /trust" : o.ScheduleUntrust != null ? "/schedule /untrust" : null;
     private const string ConfirmUnavailable = "/schedule /confirm is not available in this version; nothing was scheduled";
     public static int Run(Options options, ParsedPurgeList list, string listPathAsTyped, TextWriter stdout, TextWriter stderr, Func<DateTimeOffset> now, TimeZoneInfo local)
     {
@@ -31,7 +32,7 @@ public static class Schedule
         stdout.WriteLine($"  Expires:  {pacificExpires.ToString("ddd yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} {(Pacific().IsDaylightSavingTime(expires) ? "PDT" : "PST")} ({expires.UtcDateTime.ToString("HH:mm", CultureInfo.InvariantCulture)} UTC {weekdayExpires})");
         stdout.WriteLine($"  Host:     {hosts[0]}");
         WriteWrappedPath(stdout, listPathAsTyped);
-        stdout.WriteLine($"            {rows.Count} file(s), {Format.Size(rows.Sum(x => x.LogicalBytes))}");
+        stdout.WriteLine($"            {rows.Count} file(s), {Format.Size(rows.Sum(x => x.LogicalBytes))} in the list");
         stdout.WriteLine("  Held:     not checked now; files held open at run time are skipped");
         stdout.WriteLine("It runs only while you are logged on to this machine (disconnected is fine).");
         if (!options.Confirm) stdout.WriteLine("Preview only. Add /confirm to schedule it.");

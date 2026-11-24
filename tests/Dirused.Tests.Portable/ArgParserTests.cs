@@ -325,8 +325,8 @@ public class ArgParserTests
     public void M10b0_ScheduleParserRulesAndUsage()
     {
         Assert.Equal("/schedule can be given only once", ArgParser.Parse(new[] { "/schedule", "22:30", "/schedule", "23:00" }).Error);
-        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
-        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Error);
+        Assert.Null(ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
+        Assert.Null(ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Error);
         Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule" }).Error);
         foreach (var token in new[] { "/html", "-x", "/bogus" })
             Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", token }).Error);
@@ -338,5 +338,73 @@ public class ArgParserTests
         Assert.Contains("  /schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM\n", ArgParser.UsageText);
         Assert.Contains("                      [PT|PST|PDT|UTC]; add /confirm to schedule it\n", ArgParser.UsageText);
         Assert.DoesNotContain("/schedule", ArgParser.ShortUsageText);
+    }
+
+    [Fact]
+    public void M10b2_NewScheduleCommandsParseAndRejectInRowOrder()
+    {
+        var cases = new (string[] Args, string Error)[]
+        {
+            (new[] { "/runplan", "a", "/runplan", "b" }, "/runplan cannot be combined with other switches"),
+            (new[] { "/runplan", "a", "/json" }, "/runplan cannot be combined with other switches"),
+            (new[] { "/runplan" }, "/runplan requires a plan id"),
+            (new[] { "/runplan", "/x" }, "/runplan requires a plan id"),
+            (new[] { "/list" }, "/list and /cancel go with /schedule"),
+            (new[] { "/cancel", "x" }, "/list and /cancel go with /schedule"),
+            (new[] { "/trust" }, "/trust and /untrust go with /schedule"),
+            (new[] { "/untrust", "a" }, "/trust and /untrust go with /schedule"),
+            (new[] { "/schedule", "/list", "22:30" }, "/schedule /list cannot be combined with other switches"),
+            (new[] { "/schedule", "/list", "/trust" }, "/schedule /list cannot be combined with other switches"),
+            (new[] { "/schedule", "/cancel" }, "/schedule /cancel requires a plan id"),
+            (new[] { "/schedule", "/cancel", "-v" }, "/schedule /cancel requires a plan id"),
+            (new[] { "/schedule", "/cancel", "x", "/json" }, "/schedule /cancel cannot be combined with other switches"),
+            (new[] { "/schedule", "/trust", "a", "b" }, "/schedule /trust cannot be combined with other switches"),
+            (new[] { "/schedule", "/trust", "/json" }, "/schedule /trust cannot be combined with other switches"),
+            (new[] { "/schedule", "/untrust" }, "/schedule /untrust requires an account"),
+            (new[] { "/schedule", "/untrust", "a", "/list" }, "/schedule /list cannot be combined with other switches"),
+            (new[] { "/schedule", "/untrust", "a", "/json" }, "/schedule /untrust cannot be combined with other switches")
+        };
+        foreach (var (args, error) in cases) Assert.Equal(error, ArgParser.Parse(args).Error);
+
+        var accepted = new (string[] Args, Options Expected)[]
+        {
+            (new[] { "/runplan", "20261123-2230-a1b2" }, new Options(Array.Empty<string>(), RunPlan: "20261123-2230-a1b2")),
+            (new[] { "/schedule", "/list" }, new Options(Array.Empty<string>(), ScheduleList: true)),
+            (new[] { "/list", "/schedule" }, new Options(Array.Empty<string>(), ScheduleList: true)),
+            (new[] { "/schedule", "/cancel", "20261123-2230-a1b2" }, new Options(Array.Empty<string>(), ScheduleCancelId: "20261123-2230-a1b2")),
+            (new[] { "/schedule", "/trust" }, new Options(Array.Empty<string>(), ScheduleTrust: true)),
+            (new[] { "/schedule", "/trust", @"PROD\Domain Admins" }, new Options(Array.Empty<string>(), ScheduleTrust: true, ScheduleTrustAccount: @"PROD\Domain Admins")),
+            (new[] { "/schedule", "/untrust", "S-1-5-21-1-2-3-1104" }, new Options(Array.Empty<string>(), ScheduleUntrust: "S-1-5-21-1-2-3-1104"))
+        };
+        foreach (var (args, expected) in accepted)
+        {
+            var parsed = ArgParser.Parse(args);
+            Assert.Null(parsed.Error);
+            var actual = Assert.IsType<Options>(parsed.Options);
+            int setFormCount = (actual.ScheduleList ? 1 : 0) + (actual.ScheduleCancelId != null ? 1 : 0) +
+                (actual.RunPlan != null ? 1 : 0) + (actual.ScheduleTrust ? 1 : 0) + (actual.ScheduleUntrust != null ? 1 : 0);
+            Assert.Equal(1, setFormCount);
+            Assert.Equal(expected with { Targets = actual.Targets }, actual);
+        }
+        Assert.Null(ArgParser.Parse(new[] { "/schedule", "/trust" }).Options!.ScheduleTrustAccount);
+        Assert.Equal(@"PROD\Domain Admins", ArgParser.Parse(new[] { "/schedule", "/trust", @"PROD\Domain Admins" }).Options!.ScheduleTrustAccount);
+
+        Assert.Contains("  /schedule /list     Show scheduled purges\n", ArgParser.UsageText);
+        Assert.Contains("  /schedule /cancel <id>  Cancel a scheduled purge\n", ArgParser.UsageText);
+        Assert.Contains("  /schedule /trust [\"acct\"]  Trust a folder writer (or list them)\n", ArgParser.UsageText);
+        Assert.Contains("  /schedule /untrust \"acct\"  Stop trusting one\n", ArgParser.UsageText);
+        Assert.DoesNotContain("/runplan", ArgParser.UsageText);
+        Assert.DoesNotContain("/runplan", ArgParser.ShortUsageText);
+        var usageLines = ArgParser.UsageText.Split('\n');
+        Assert.All(usageLines, line => Assert.True(line.Length <= 80, $"UsageText line exceeds 80 columns: '{line}' ({line.Length})"));
+        int scheduleContinuation = Array.IndexOf(usageLines, "                      [PT|PST|PDT|UTC]; add /confirm to schedule it");
+        Assert.True(scheduleContinuation >= 0);
+        Assert.Equal(new[]
+        {
+            "  /schedule /list     Show scheduled purges",
+            "  /schedule /cancel <id>  Cancel a scheduled purge",
+            "  /schedule /trust [\"acct\"]  Trust a folder writer (or list them)",
+            "  /schedule /untrust \"acct\"  Stop trusting one"
+        }, usageLines.Skip(scheduleContinuation + 1).Take(4));
     }
 }

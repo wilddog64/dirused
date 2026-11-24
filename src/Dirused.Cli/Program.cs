@@ -57,6 +57,7 @@ public static class Program
         }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
+        if (Schedule.NotAvailableForm(options) is { } form) { error.WriteLine($"{form} is not available in this version"); return 1; }
         foreach (var path in new[] { options.SaveList, options.FromList, options.Output }.Where(p => p != null))
         {
             try { _ = Path.GetFullPath(path!); }

@@ -26,7 +26,7 @@ public class ScheduleTests
             "  Expires:  Tue 2026-11-24 21:00 PST (05:00 UTC Wed)",
             "  Host:     us03p02ffm01",
             "  List:     l.txt",
-            "            12 file(s), 176.2 GB",
+            "            12 file(s), 176.2 GB in the list",
             "  Held:     not checked now; files held open at run time are skipped",
             "It runs only while you are logged on to this machine (disconnected is fine).",
             "Preview only. Add /confirm to schedule it."
@@ -50,8 +50,23 @@ public class ScheduleTests
         var parsed = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "pst" });
         Assert.Equal("PST", parsed.Options!.ScheduleZone);
         Assert.Equal("/fromlist can only be combined with /purge, /confirm, /html, /output, /json, /csv, /yes and /schedule", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "BOGUS" }).Error);
-        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
-        Assert.Equal("Unknown switch: /list", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/list" }).Error);
+        Assert.Null(ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
+        Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "22:30" }).Error);
+        Assert.Equal("/schedule /list cannot be combined with other switches", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/list" }).Error);
+    }
+
+    [Fact]
+    public void NewFormsAreRefusedByInterimHelper()
+    {
+        Assert.Null(Schedule.NotAvailableForm(new Options(Array.Empty<string>())));
+        Assert.Equal("/runplan", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/runplan", "x" }).Options!));
+        Assert.Equal("/schedule /list", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/list" }).Options!));
+        Assert.Equal("/schedule /cancel", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Options!));
+        Assert.Equal("/schedule /trust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/trust" }).Options!));
+        Assert.Equal("/schedule /trust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/trust", "acct" }).Options!));
+        Assert.Equal("/schedule /untrust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/untrust", "x" }).Options!));
+        var old = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30" }).Options!;
+        Assert.Null(Schedule.NotAvailableForm(old));
     }
 
     [Fact]

@@ -14,7 +14,7 @@ Scheduled purge preview (nothing is scheduled yet)
   Expires:  Tue 2026-11-24 21:00 PST (05:00 UTC Wed)
   Host:     us03p02ffm01
   List:     C:\Users\op\m10b.txt
-            12 file(s), 176.2 GB
+            12 file(s), 176.2 GB in the list
   Held:     not checked now; files held open at run time are skipped
 It runs only while you are logged on to this machine (disconnected is fine).
 Preview only. Add /confirm to schedule it.

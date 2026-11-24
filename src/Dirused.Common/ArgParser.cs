@@ -13,7 +13,7 @@ public static class ArgParser
     }
 
     private static bool MissingPath(string value) => string.IsNullOrWhiteSpace(value) || KnownSwitches.Any(n => IsFlag(value, n));
-    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update", "yes", "schedule" };
+    private static readonly string[] KnownSwitches = { "all", "noupdatecheck", "top", "json", "csv", "html", "output", "purge", "confirm", "savelist", "fromlist", "minsize", "plan", "monitor", "threshold", "gui", "node", "file", "summary", "warn", "crit", "deep", "exact", "largest", "largestcount", "timeout", "parallel", "help", "version", "update", "yes", "schedule", "list", "cancel", "runplan", "trust", "untrust" };
 
     public const string ShortUsageText =
         "Usage: dirused <target>... [/file <path>] [/summary] [/deep [N]] [/exact]\n" +
@@ -69,6 +69,10 @@ public static class ArgParser
         "  /fromlist <file>    Use a saved delete list\n" +
         "  /schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM\n" +
         "                      [PT|PST|PDT|UTC]; add /confirm to schedule it\n" +
+        "  /schedule /list     Show scheduled purges\n" +
+        "  /schedule /cancel <id>  Cancel a scheduled purge\n" +
+        "  /schedule /trust [\"acct\"]  Trust a folder writer (or list them)\n" +
+        "  /schedule /untrust \"acct\"  Stop trusting one\n" +
         "  /confirm            With /purge: really delete. Deletes are permanent\n" +
         "                      (admin shares like \\\\host\\d$ skip the Recycle Bin).\n" +
         "                      Each deletion is logged to C:\\temp\\dirused-purge.log\n" +
@@ -118,6 +122,43 @@ public static class ArgParser
 
     public static ParseResult Parse(string[] args)
     {
+        bool Has(string name) => args.Any(a => IsFlag(a, name));
+        int Count(string name) => args.Count(a => IsFlag(a, name));
+        bool SwitchLike(string value) => !string.IsNullOrEmpty(value) && ((value.StartsWith('/') && !value.StartsWith("//", StringComparison.Ordinal)) || value.StartsWith('-'));
+        int runplan = Array.FindIndex(args, a => IsFlag(a, "runplan"));
+        if (runplan >= 0)
+        {
+            if (Count("runplan") > 1 || args.Where((_, i) => i != runplan && i != runplan + 1).Any()) return new(Error: "/runplan cannot be combined with other switches");
+            if (runplan + 1 >= args.Length || SwitchLike(args[runplan + 1])) return new(Error: "/runplan requires a plan id");
+            return new(Options: new Options(Array.Empty<string>(), RunPlan: args[runplan + 1]));
+        }
+        bool listSwitch = Has("list"), cancelSwitch = Has("cancel"), trustSwitch = Has("trust"), untrustSwitch = Has("untrust"), scheduleSwitch = Has("schedule");
+        if ((listSwitch || cancelSwitch) && !scheduleSwitch) return new(Error: "/list and /cancel go with /schedule");
+        if ((trustSwitch || untrustSwitch) && !scheduleSwitch) return new(Error: "/trust and /untrust go with /schedule");
+        bool anyOtherScheduleCommand = Count("schedule") > 1 || Count("list") > 1 || Count("cancel") > 1 || Count("trust") > 1 || Count("untrust") > 1;
+        if (scheduleSwitch && listSwitch && (anyOtherScheduleCommand || args.Length != 2)) return new(Error: "/schedule /list cannot be combined with other switches");
+        if (scheduleSwitch && listSwitch) return new(Options: new Options(Array.Empty<string>(), ScheduleList: true));
+        if (scheduleSwitch && cancelSwitch)
+        {
+            int i = Array.FindIndex(args, a => IsFlag(a, "cancel"));
+            if (i + 1 >= args.Length || SwitchLike(args[i + 1])) return new(Error: "/schedule /cancel requires a plan id");
+            if (anyOtherScheduleCommand || args.Length != 3) return new(Error: "/schedule /cancel cannot be combined with other switches");
+            return new(Options: new Options(Array.Empty<string>(), ScheduleCancelId: args[i + 1]));
+        }
+        if (scheduleSwitch && trustSwitch)
+        {
+            int i = Array.FindIndex(args, a => IsFlag(a, "trust"));
+            string? account = i + 1 < args.Length && !SwitchLike(args[i + 1]) ? args[i + 1] : null;
+            if (anyOtherScheduleCommand || args.Length != (account == null ? 2 : 3)) return new(Error: "/schedule /trust cannot be combined with other switches");
+            return new(Options: new Options(Array.Empty<string>(), ScheduleTrust: true, ScheduleTrustAccount: account));
+        }
+        if (scheduleSwitch && untrustSwitch)
+        {
+            int i = Array.FindIndex(args, a => IsFlag(a, "untrust"));
+            if (i + 1 >= args.Length || SwitchLike(args[i + 1])) return new(Error: "/schedule /untrust requires an account");
+            if (anyOtherScheduleCommand || args.Length != 3) return new(Error: "/schedule /untrust cannot be combined with other switches");
+            return new(Options: new Options(Array.Empty<string>(), ScheduleUntrust: args[i + 1]));
+        }
         var schedules = args.Select((a, i) => (a, i)).Where(x => IsFlag(x.a, "schedule")).ToList();
         bool hasFromList = args.Any(a => IsFlag(a, "fromlist"));
         if (schedules.Count > 1) return new(Error: "/schedule can be given only once");
