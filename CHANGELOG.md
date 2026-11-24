@@ -7,6 +7,7 @@ Each release's section here becomes its GitHub release notes. A tag with no sect
 ## [Unreleased]
 
 ### Added
+- `/schedule` preview for a one-time `/fromlist /purge` run; scheduling is not available yet.
 - `/purge` held-file detection: probes candidate files with share mode 0, discovers Procrun Tomcat services via read-only SCM queries, and reports `would delete after stopping <service>` in dry runs or `failed: in use by <service> (stop not available yet)` under `/confirm`.
 - `/purge /confirm` stops Tomcat for held redirect logs, deletes them, restarts Tomcat, and verifies it returns to Running.
 - Switch `/yes` with `/purge /confirm`: automates service stops within the off-hours window (19:00–06:00).

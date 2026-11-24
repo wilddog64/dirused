@@ -98,6 +98,8 @@ The help describes the switches this way:
                     /minsize to see them; JSON and CSV list every file.
 /savelist <file>    Save eligible rows after the dry run
 /fromlist <file>    Purge only rows in a saved list (requires /purge)
+/schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM
+                    [PT|PST|PDT|UTC]; add /confirm to schedule it
 /confirm            With /purge: really delete. Deletes are permanent
                     (admin shares like \\host\d$ skip the Recycle Bin).
                     Each deletion is logged to C:\temp\dirused-purge.log

@@ -1,5 +1,23 @@
 # dirused Purge Reference
 
+## Scheduled purge (preview)
+
+This version only previews; scheduling comes in a later version.
+
+Use `/fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC]` to preview a one-time run. Bare times use the machine's Pacific time zone. `PT` uses Pacific time and rejects daylight-saving gaps or overlaps; `PST` and `PDT` select a specific offset, and `UTC` interprets the time as UTC. The run must be at least 2 minutes and no more than 23 hours 45 minutes away. Adding `/confirm` reports that scheduling is unavailable and schedules nothing.
+
+```text
+Scheduled purge preview (nothing is scheduled yet)
+  Run:      Mon 2026-11-23 22:30 PST (06:30 UTC Tue), in 1 h 30 min
+  Expires:  Tue 2026-11-24 21:00 PST (05:00 UTC Wed)
+  Host:     us03p02ffm01
+  List:     C:\Users\op\m10b.txt
+            12 file(s), 176.2 GB
+  Held:     not checked now; files held open at run time are skipped
+It runs only while you are logged on to this machine (disconnected is fine).
+Preview only. Add /confirm to schedule it.
+```
+
 `dirused /purge` safely removes large, old files identified during directory scans or loaded from a previously reviewed delete list.
 
 This document describes the complete `/purge` decision path, dry run vs confirm modes, held-file detection, Tomcat service stop-delete-start automation, exit codes, and file formats.
