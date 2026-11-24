@@ -126,7 +126,7 @@ public static class ArgParser
         if (schedules.Count == 1)
         {
             int si = schedules[0].i;
-            if (si + 1 >= args.Length || IsFlag(args[si + 1], "schedule") || IsFlag(args[si + 1], "purge") || IsFlag(args[si + 1], "confirm") || IsFlag(args[si + 1], "yes")) return new(Error: "/schedule requires a time, e.g. /schedule 22:30 PT");
+            if (si + 1 >= args.Length || IsFlag(args[si + 1], "schedule") || IsFlag(args[si + 1], "purge") || IsFlag(args[si + 1], "confirm") || IsFlag(args[si + 1], "yes") || args[si + 1].StartsWith('-') || (args[si + 1].StartsWith('/') && !args[si + 1].StartsWith("//", StringComparison.Ordinal))) return new(Error: "/schedule requires a time, e.g. /schedule 22:30 PT");
             scheduleTime = args[si + 1];
             if (!System.Text.RegularExpressions.Regex.IsMatch(scheduleTime, @"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return new(Error: "/schedule: time must be HH:MM (00:00-23:59), optionally followed by PT, PST, PDT or UTC");
             if (si + 2 < args.Length && !args[si + 2].StartsWith('/') && !args[si + 2].StartsWith('-'))

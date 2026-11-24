@@ -6,6 +6,8 @@ This version only previews; scheduling comes in a later version.
 
 Use `/fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC]` to preview a one-time run. Bare times use the machine's Pacific time zone. `PT` uses Pacific time and rejects daylight-saving gaps or overlaps; `PST` and `PDT` select a specific offset, and `UTC` interprets the time as UTC. The run must be at least 2 minutes and no more than 23 hours 45 minutes away. Adding `/confirm` reports that scheduling is unavailable and schedules nothing.
 
+A list whose server cannot be read is refused because the preview cannot identify which host the run would affect.
+
 ```text
 Scheduled purge preview (nothing is scheduled yet)
   Run:      Mon 2026-11-23 22:30 PST (06:30 UTC Tue), in 1 h 30 min

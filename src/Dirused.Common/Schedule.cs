@@ -13,7 +13,8 @@ public static class Schedule
         var hosts = new List<string>();
         foreach (var row in rows)
         {
-            string host = GetHost(row.Path);
+            string? host = GetHost(row.Path);
+            if (host == null) { stderr.WriteLine($"/schedule: cannot tell which server {row.Path} is on"); return 1; }
             if (!hosts.Contains(host, StringComparer.OrdinalIgnoreCase)) hosts.Add(host);
         }
         if (hosts.Count > 1) { stderr.WriteLine($"/schedule: the list covers more than one host ({string.Join(", ", hosts)}); save one list per host and schedule each"); return 1; }
@@ -33,9 +34,10 @@ public static class Schedule
         stdout.WriteLine($"            {rows.Count} file(s), {Format.Size(rows.Sum(x => x.LogicalBytes))}");
         stdout.WriteLine("  Held:     not checked now; files held open at run time are skipped");
         stdout.WriteLine("It runs only while you are logged on to this machine (disconnected is fine).");
+        if (!options.Confirm) stdout.WriteLine("Preview only. Add /confirm to schedule it.");
+        if (list.Errors.Count > 0) { stderr.WriteLine("Bad list lines:"); foreach (var e in list.Errors) stderr.WriteLine($"  line {e.Line}: {e.Reason}"); }
         if (options.Confirm) { stderr.WriteLine(ConfirmUnavailable); return 1; }
-        stdout.WriteLine("Preview only. Add /confirm to schedule it.");
-        if (list.Errors.Count > 0) { stderr.WriteLine("Bad list lines:"); foreach (var e in list.Errors) stderr.WriteLine($"  line {e.Line}: {e.Reason}"); return 3; }
+        if (list.Errors.Count > 0) return 3;
         return 0;
     }
 
@@ -64,8 +66,28 @@ public static class Schedule
         }
         else
         {
-            var wall = TimeZoneInfo.ConvertTime(created, pacific).Date.Add(time);
-            if (wall <= TimeZoneInfo.ConvertTime(created, pacific).DateTime) wall = wall.AddDays(1);
+            var pacificNow = TimeZoneInfo.ConvertTime(created, pacific);
+            var wall = pacificNow.Date.Add(time);
+            bool rollToTomorrow;
+            if (pacific.IsInvalidTime(wall))
+            {
+                var gapEnd = wall;
+                while (pacific.IsInvalidTime(gapEnd)) gapEnd = gapEnd.AddMinutes(1);
+                var gapEndInstant = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(gapEnd, pacific));
+                rollToTomorrow = gapEndInstant <= created;
+            }
+            else if (pacific.IsAmbiguousTime(wall))
+            {
+                var offsets = pacific.GetAmbiguousTimeOffsets(wall);
+                var later = new DateTimeOffset(wall, offsets.Min());
+                rollToTomorrow = later <= created;
+            }
+            else
+            {
+                var today = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(wall, pacific));
+                rollToTomorrow = today <= created;
+            }
+            if (rollToTomorrow) wall = wall.AddDays(1);
             if (pacific.IsInvalidTime(wall)) { error.WriteLine($"/schedule: {wall:yyyy-MM-dd} {value} does not exist in Pacific time (clocks go forward); pick another time"); return false; }
             if (pacific.IsAmbiguousTime(wall)) { error.WriteLine($"/schedule: {wall:yyyy-MM-dd} {value} happens twice in Pacific time; write PST or PDT"); return false; }
             candidate = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(wall, pacific));
@@ -86,13 +108,18 @@ public static class Schedule
         int minutes = (int)Math.Floor(delta.TotalMinutes);
         return minutes < 60 ? $"in {minutes} min" : $"in {minutes / 60} h {minutes % 60} min";
     }
-    private static string GetHost(string path)
+    private static string? GetHost(string path)
     {
         string p = path.Replace('/', '\\');
-        if (p.StartsWith(@"\\?\", StringComparison.Ordinal) && p.Length >= 6 && char.IsAsciiLetter(p[4]) && p[5] == ':') return "this machine";
-        if (p.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return p[8..].Split('\\')[0];
-        if (p.StartsWith(@"\\", StringComparison.Ordinal)) return p[2..].Split('\\')[0];
+        if ((p.StartsWith(@"\\?\", StringComparison.Ordinal) || p.StartsWith(@"\\.\", StringComparison.Ordinal)) && p.Length >= 6 && char.IsAsciiLetter(p[4]) && p[5] == ':') return "this machine";
+        if (p.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return ParseServer(p[8..]);
+        if (p.StartsWith(@"\\", StringComparison.Ordinal)) return ParseServer(p[2..]);
         return "this machine";
+    }
+    private static string? ParseServer(string path)
+    {
+        string server = path.Split('\\')[0];
+        return string.IsNullOrEmpty(server) || server is "." or "?" ? null : server;
     }
     private static void WriteWrappedPath(TextWriter w, string path)
     {

@@ -328,6 +328,8 @@ public class ArgParserTests
         Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/list" }).Error);
         Assert.Equal("/schedule requires /fromlist", ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Error);
         Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule" }).Error);
+        foreach (var token in new[] { "/html", "-x", "/bogus" })
+            Assert.Equal("/schedule requires a time, e.g. /schedule 22:30 PT", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", token }).Error);
         Assert.Equal("/schedule: time must be HH:MM (00:00-23:59), optionally followed by PT, PST, PDT or UTC", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "9:00" }).Error);
         Assert.Equal("/schedule can only be combined with /fromlist, /purge, /confirm and /yes", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/html" }).Error);
         Assert.Equal("/yes needs /purge /confirm", ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30", "/yes" }).Error);
