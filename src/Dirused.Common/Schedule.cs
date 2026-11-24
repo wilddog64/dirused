@@ -9,18 +9,26 @@ public static class Schedule
     private const string ConfirmUnavailable = "/schedule /confirm is not available in this version; nothing was scheduled";
     public static int Run(Options options, ParsedPurgeList list, string listPathAsTyped, TextWriter stdout, TextWriter stderr, Func<DateTimeOffset> now, TimeZoneInfo local)
     {
+        int result = Preview(list, listPathAsTyped, now(), local, options, stdout, stderr, null, out _, out _);
+        if (options.Confirm && result != 1) { stderr.WriteLine(ConfirmUnavailable); return 1; }
+        return result;
+    }
+
+    internal static int Preview(ParsedPurgeList list, string listPathAsTyped, DateTimeOffset created, TimeZoneInfo local, Options options, TextWriter stdout, TextWriter stderr, PreviewExtras? extras, out DateTimeOffset run, out string host)
+    {
+        run = default; host = "";
         var rows = list.Files;
         if (rows.Count == 0) { stderr.WriteLine("/schedule: the list has no files to delete"); return 1; }
         var hosts = new List<string>();
         foreach (var row in rows)
         {
-            string? host = GetHost(row.Path);
-            if (host == null) { stderr.WriteLine($"/schedule: cannot tell which server {row.Path} is on"); return 1; }
-            if (!hosts.Contains(host, StringComparer.OrdinalIgnoreCase)) hosts.Add(host);
+            string? rowHost = GetHost(row.Path);
+            if (rowHost == null) { stderr.WriteLine($"/schedule: cannot tell which server {row.Path} is on"); return 1; }
+            if (!hosts.Contains(rowHost, StringComparer.OrdinalIgnoreCase)) hosts.Add(rowHost);
         }
         if (hosts.Count > 1) { stderr.WriteLine($"/schedule: the list covers more than one host ({string.Join(", ", hosts)}); save one list per host and schedule each"); return 1; }
-        var created = now();
-        if (!TryRunTime(options, created, local, stderr, out var run)) return 1;
+        if (!TryRunTime(options, created, local, stderr, out run)) return 1;
+        host = hosts[0];
         var expires = created.AddHours(24);
         DateTimeOffset pacificRun = TimeZoneInfo.ConvertTime(run, Pacific());
         DateTimeOffset pacificExpires = TimeZoneInfo.ConvertTime(expires, Pacific());
@@ -33,16 +41,25 @@ public static class Schedule
         stdout.WriteLine($"  Host:     {hosts[0]}");
         WriteWrappedPath(stdout, listPathAsTyped);
         stdout.WriteLine($"            {rows.Count} file(s), {Format.Size(rows.Sum(x => x.LogicalBytes))} in the list");
+        if (extras != null) stdout.WriteLine($"            sha256 {extras.Sha12}");
         stdout.WriteLine("  Held:     not checked now; files held open at run time are skipped");
+        if (extras != null) { WriteWrapped(stdout, "  Task:     ", extras.TaskName); WriteWrapped(stdout, "  Plan dir: ", extras.PlanDir); WriteWrapped(stdout, "  Program:  ", extras.PlanDir + "\\dirused.exe"); WriteWrapped(stdout, "            ", "(copy of " + extras.ExePath + ")"); }
         stdout.WriteLine("It runs only while you are logged on to this machine (disconnected is fine).");
-        if (!options.Confirm) stdout.WriteLine("Preview only. Add /confirm to schedule it.");
+        if (!options.Confirm && extras == null) stdout.WriteLine("Preview only. Add /confirm to schedule it.");
         if (list.Errors.Count > 0) { stderr.WriteLine("Bad list lines:"); foreach (var e in list.Errors) stderr.WriteLine($"  line {e.Line}: {e.Reason}"); }
-        if (options.Confirm) { stderr.WriteLine(ConfirmUnavailable); return 1; }
         if (list.Errors.Count > 0) return 3;
         return 0;
     }
 
-    private static bool TryRunTime(Options options, DateTimeOffset created, TimeZoneInfo local, TextWriter error, out DateTimeOffset run)
+    private static void WriteWrapped(TextWriter w, string prefix, string value)
+    {
+        if (prefix.Length + value.Length <= 80) { w.WriteLine(prefix + value); return; }
+        for (int i = 0; i < value.Length; i += 68) w.WriteLine((i == 0 ? prefix : "            ") + value.Substring(i, Math.Min(68, value.Length - i)));
+    }
+
+    internal static bool TryRunTime(Options options, DateTimeOffset created, TimeZoneInfo local, TextWriter error, out DateTimeOffset run) => TryRunTimeCore(options, created, local, error, out run);
+
+    private static bool TryRunTimeCore(Options options, DateTimeOffset created, TimeZoneInfo local, TextWriter error, out DateTimeOffset run)
     {
         run = default;
         string value = options.ScheduleTime ?? "";
