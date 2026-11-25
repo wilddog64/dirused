@@ -191,11 +191,13 @@ public sealed class ProgramScheduleTests
         foreach (string[] form in forms)
         {
             var rig = new Rig(temp.PathFor("purge-" + Guid.NewGuid().ToString("N") + ".log"));
-            Invoke(form, rig.ProgramSeams());
+            string freshState = temp.PathFor("update-state-" + Guid.NewGuid().ToString("N") + ".json");
+            Assert.False(File.Exists(freshState));
+            Invoke(form, rig.ProgramSeams(updateStatePath: freshState));
             Assert.Equal(0, rig.Release.Calls);
         }
         var positive = new Rig(temp.PathFor("usage-purge.log"));
-            Invoke(new[] { "/?" }, positive.ProgramSeams(updateStatePath: temp.PathFor("update-state.json")));
+        Invoke(new[] { "/?" }, positive.ProgramSeams(updateStatePath: temp.PathFor("update-state.json")));
         Assert.True(positive.Release.Calls > 0);
     }
 
