@@ -6,6 +6,10 @@ using Dirused.Common.Update;
 using System.Reflection;
 using System.Runtime.InteropServices;
 namespace Dirused.Cli;
+public sealed record ProgramTestSeams(ScheduleSeams? Schedule, RunPlanSeams? Run, bool IsWindows, IReleaseSource? Source,
+    string Version, string PurgeLogPath, IPurgeFileSystem? Fs = null, IServiceQuery? Services = null, IServiceControl? Control = null,
+    TextReader? Input = null, bool? InputRedirected = null, Func<DateTime>? LocalNow = null, Action<TimeSpan>? Sleep = null,
+    Func<DateTime>? UtcNow = null, string? UpdateStatePath = null, Action? Cleanup = null);
 public static class Program
 {
     public static int Main(string[] args)
@@ -17,8 +21,9 @@ public static class Program
     public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);
     public static int Run(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares) => RunCore(args, output, error, nodeShares, null, "0.0.0-dev");
     public static int RunWithReleaseSource(string[] args, TextWriter output, TextWriter error, IReleaseSource source, string version, string? updateStatePath = null) => RunCore(args, output, error, null, source, version, updateStatePath);
+    public static int RunWithSchedule(string[] args, TextWriter output, TextWriter error, ProgramTestSeams seams) => RunCore(args, output, error, null, seams.Source, seams.Version, seams.UpdateStatePath, seams.PurgeLogPath, seams.Fs, seams.Services, null, seams.Control, seams.Input, seams.InputRedirected, seams.LocalNow, seams.Sleep, seams.UtcNow, seams.Schedule, seams.Run, seams.IsWindows, seams.Cleanup);
     public static int RunWithPurge(string[] args, TextWriter output, TextWriter error, string purgeLogPath, IPurgeFileSystem? fs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? control = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null) => RunCore(args, output, error, null, null, "0.0.0-dev", null, purgeLogPath, fs, services, isFixedDrive, control, input, isInputRedirected, localNow, sleep, utcNow);
-    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? serviceControl = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null)
+    private static int RunCore(string[] args, TextWriter output, TextWriter error, INodeShares? nodeShares, IReleaseSource? source, string version, string? updateStatePath = null, string? purgeLogPath = null, IPurgeFileSystem? purgeFs = null, IServiceQuery? services = null, Func<string, bool>? isFixedDrive = null, IServiceControl? serviceControl = null, TextReader? input = null, bool? isInputRedirected = null, Func<DateTime>? localNow = null, Action<TimeSpan>? sleep = null, Func<DateTime>? utcNow = null, ScheduleSeams? scheduleSeams = null, RunPlanSeams? runSeams = null, bool? isWindows = null, Action? cleanup = null)
     {
         IServiceQuery? effectiveServices = services ?? (OperatingSystem.IsWindows() ? new RealServiceQuery() : null);
         Func<string, bool>? effectiveFixedDrive = isFixedDrive;
@@ -27,7 +32,9 @@ public static class Program
         bool effectiveInputRedirected = isInputRedirected ?? Console.IsInputRedirected;
         Func<DateTime> effectiveLocalNow = localNow ?? (() => DateTime.Now);
         Action<TimeSpan> effectiveSleep = sleep ?? (t => Thread.Sleep(t));
-        if (source != null) CleanupUpdateFiles();
+        bool windows = isWindows ?? OperatingSystem.IsWindows();
+        bool scheduleArg = args.Any(a => ArgParser.IsFlag(a, "runplan") || ArgParser.IsFlag(a, "schedule"));
+        if (source != null && !scheduleArg) (cleanup ?? CleanupUpdateFiles)();
         if (args.Length == 1 && ArgParser.IsFlag(args[0], "version")) { output.WriteLine($"dirused {version} ({System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier})"); return 0; }
         if (args.Any(a => ArgParser.IsFlag(a, "update")))
         {
@@ -57,7 +64,18 @@ public static class Program
         }
         if (parsed.Error != null) { error.WriteLine(parsed.Error); return 1; }
         var options = parsed.Options!;
-        if (Schedule.NotAvailableForm(options) is { } form) { error.WriteLine($"{form} is not available in this version"); return 1; }
+        ScheduleSeams? EffectiveSchedule() => scheduleSeams ?? (windows ? WindowsSchedule.Create(version) : null);
+        if (options.RunPlan != null || options.ScheduleList || options.ScheduleCancelId != null || options.ScheduleTrust || options.ScheduleUntrust != null)
+        {
+            var seams = EffectiveSchedule();
+            if (!windows && seams == null) { error.WriteLine("/schedule needs Windows"); return 1; }
+            if (seams == null) { error.WriteLine("/schedule needs Windows"); return 1; }
+            if (options.RunPlan != null) return PlanRunner.RunPlan(options.RunPlan, seams, runSeams ?? (windows ? WindowsSchedule.RunSeams() : throw new InvalidOperationException()), output, error);
+            if (options.ScheduleList) return SchedulePlans.List(seams, output, error);
+            if (options.ScheduleCancelId != null) return SchedulePlans.Cancel(options.ScheduleCancelId, seams, output, error);
+            if (options.ScheduleTrust) return TrustCommands.Trust(options.ScheduleTrustAccount, seams.Trust, seams.Accounts, output, error);
+            return TrustCommands.Untrust(options.ScheduleUntrust!, seams.Trust, seams.Accounts, output, error);
+        }
         foreach (var path in new[] { options.SaveList, options.FromList, options.Output }.Where(p => p != null))
         {
             try { _ = Path.GetFullPath(path!); }
@@ -67,8 +85,17 @@ public static class Program
         if (options.SaveList != null && ((options.Output != null && Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.SaveList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase))) { error.WriteLine("/savelist cannot be the output or purge log"); return 1; }
         if (options.FromList != null)
         {
-            if ((options.Output != null && Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/fromlist cannot be the output or purge log"); return 1; }
+            if ((options.Output != null && Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(options.Output), StringComparison.OrdinalIgnoreCase)) || Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine(Path.GetFullPath(options.FromList).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase) ? "/fromlist cannot be the purge log" : "/fromlist cannot be the output or purge log"); return 1; }
             if (options.Confirm && options.Output != null && Path.GetFullPath(options.Output).Equals(Path.GetFullPath(effectivePurgeLog), StringComparison.OrdinalIgnoreCase)) { error.WriteLine("/output cannot be the purge log"); return 1; }
+            if (options.ScheduleTime != null && (windows || scheduleSeams != null))
+            {
+                byte[] bytes;
+                try { bytes = File.ReadAllBytes(options.FromList); }
+                catch { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
+                var seams = EffectiveSchedule()!;
+                return ScheduleCommands.Schedule(new ScheduleRequest(options, bytes, options.FromList, Path.GetFullPath(options.FromList)), seams, output, error, effectiveInput, effectiveInputRedirected);
+            }
+            if (options.ScheduleTime != null && !windows && options.Confirm) { error.WriteLine("/schedule needs Windows"); return 1; }
             if (!PurgeList.Read(options.FromList, out var parsedList)) { error.WriteLine($"not a dirused delete list: {options.FromList}"); return 1; }
             if (options.ScheduleTime != null) return Schedule.Run(options, parsedList!, options.FromList, output, error, () => DateTimeOffset.Now, TimeZoneInfo.Local);
             if (!OperatingSystem.IsWindows()) { error.WriteLine("/purge is available on Windows only"); return 1; }

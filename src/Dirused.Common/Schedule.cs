@@ -5,7 +5,6 @@ namespace Dirused.Common;
 
 public static class Schedule
 {
-    public static string? NotAvailableForm(Options o) => o.RunPlan != null ? "/runplan" : o.ScheduleList ? "/schedule /list" : o.ScheduleCancelId != null ? "/schedule /cancel" : o.ScheduleTrust ? "/schedule /trust" : o.ScheduleUntrust != null ? "/schedule /untrust" : null;
     private const string ConfirmUnavailable = "/schedule /confirm is not available in this version; nothing was scheduled";
     public static int Run(Options options, ParsedPurgeList list, string listPathAsTyped, TextWriter stdout, TextWriter stderr, Func<DateTimeOffset> now, TimeZoneInfo local)
     {

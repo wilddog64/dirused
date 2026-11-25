@@ -56,20 +56,6 @@ public class ScheduleTests
     }
 
     [Fact]
-    public void NewFormsAreRefusedByInterimHelper()
-    {
-        Assert.Null(Schedule.NotAvailableForm(new Options(Array.Empty<string>())));
-        Assert.Equal("/runplan", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/runplan", "x" }).Options!));
-        Assert.Equal("/schedule /list", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/list" }).Options!));
-        Assert.Equal("/schedule /cancel", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/cancel", "x" }).Options!));
-        Assert.Equal("/schedule /trust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/trust" }).Options!));
-        Assert.Equal("/schedule /trust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/trust", "acct" }).Options!));
-        Assert.Equal("/schedule /untrust", Schedule.NotAvailableForm(ArgParser.Parse(new[] { "/schedule", "/untrust", "x" }).Options!));
-        var old = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30" }).Options!;
-        Assert.Null(Schedule.NotAvailableForm(old));
-    }
-
-    [Fact]
     public void RejectsMultipleHostsAndEmptyLists()
     {
         var options = ArgParser.Parse(new[] { "/fromlist", "l", "/purge", "/schedule", "22:30" }).Options!;
