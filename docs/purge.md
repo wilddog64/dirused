@@ -1,12 +1,21 @@
 # dirused Purge Reference
 
-## Scheduled purge (preview)
+## Scheduled purge
 
-This version only previews; scheduling comes in a later version.
+dirused supports scheduling a one-time purge of a saved delete list via Windows Task Scheduler.
 
-Use `/fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC]` to preview a one-time run. Bare times use the machine's Pacific time zone. `PT` uses Pacific time and rejects daylight-saving gaps or overlaps; `PST` and `PDT` select a specific offset, and `UTC` interprets the time as UTC. The run must be at least 2 minutes and no more than 23 hours 45 minutes away. Adding `/confirm` reports that scheduling is unavailable and schedules nothing.
+### Forms
 
-A list whose server cannot be read is refused because the preview cannot identify which host the run would affect.
+A scheduled purge is configured from a saved delete list using `/fromlist`:
+
+- **Preview:** `dirused /fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC]`
+  Validates the list, checks the run time, displays schedule details, and previews the task without creating it.
+- **Confirm with prompt:** `dirused /fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC] /confirm`
+  Displays the preview, asks `Schedule this? [y/N] `, and creates the scheduled task if confirmed with `y` or `yes`.
+- **Confirm non-interactive:** `dirused /fromlist <file> /purge /schedule <time> [PT|PST|PDT|UTC] /confirm /yes`
+  Creates the scheduled task immediately without an interactive confirmation prompt (`ScheduleCommands.cs:37-41`).
+
+Preview output as Windows prints it:
 
 ```text
 Scheduled purge preview (nothing is scheduled yet)
@@ -15,10 +24,161 @@ Scheduled purge preview (nothing is scheduled yet)
   Host:     us03p02ffm01
   List:     C:\Users\op\m10b.txt
             12 file(s), 176.2 GB in the list
+            sha256 0123456789ab
   Held:     not checked now; files held open at run time are skipped
+  Task:     \dirused\S-1-5-21-1-2-3-1104\purge-20261123-2230-a1b2
+  Plan dir: C:\Users\op\AppData\Local\dirused\plans\20261123-2230-a1b2
+  Program:  C:\Users\op\AppData\Local\dirused\plans\20261123-2230-a1b2\dirused.e
+            xe
+            (copy of C:\Program Files\dirused\dirused.exe)
 It runs only while you are logged on to this machine (disconnected is fine).
 Preview only. Add /confirm to schedule it.
 ```
+
+Time rules:
+- Run time must be at least 2 minutes and no more than 23 hours 45 minutes ahead (`Schedule.cs:113-114`).
+- Accepted time format is `HH:MM` (`00:00`–`23:59`), optionally followed by a time zone designator: bare time, `PT`, `PST`, `PDT`, or `UTC`.
+- A bare time requires the local machine to be set to Pacific time (`Schedule.cs:68`).
+- `PT` uses Pacific time and rejects daylight-saving transition gaps (clocks go forward) and ambiguous overlap times (clocks fall back).
+- `PST` selects standard time (UTC-08:00), `PDT` selects daylight saving time (UTC-07:00), and `UTC` interprets the time as UTC.
+
+### Where to run it
+
+- Run from a normal window; an elevated (administrator) window is refused (`ScheduleCommands.cs:35`).
+- The task runs only while you are logged on (`TaskXml.cs:190` using `InteractiveToken`).
+- Disconnected sessions (e.g. RDP window closed without signing out) are fine.
+- If you are signed out, the task does not run and the plan state becomes `missed (did not run)`.
+- No password is stored.
+
+### Held files
+
+Files held open at run time are skipped, and Tomcat is never stopped or started by a scheduled run (`Purge.cs:495-497`).
+
+### Plan folder and program copy
+
+When scheduled, dirused creates a dedicated plan directory at `%LOCALAPPDATA%\dirused\plans\<id>` holding `plan.txt`, `list.txt`, `dirused.exe`, `task.xml`, and later `claim` and `report.txt` (`ScheduleWindows.cs:172-173`).
+
+The run uses the copied program and list, and refuses if either changed (`refused: program copy changed since it was scheduled` or `refused: list changed since it was scheduled`). A plan expires 24 hours after it is made (`ScheduleCommands.cs:28`).
+
+### `/schedule /list`
+
+`dirused /schedule /list` prints one line per plan with plan id, Pacific time, target host, state, file count and size, and list name:
+
+```text
+20261123-2230-a1b2  Mon 2026-11-23 22:30 PST  us03p02ffm01  scheduled  12 file(s) 176.2 GB  m10b.txt
+```
+
+Plan states:
+
+| State | Meaning | Action |
+|---|---|---|
+| `scheduled` | Task is registered with Windows Task Scheduler and waiting for its run time. | None; ensure your user account remains logged on. |
+| `running` | Plan is currently executing via its copied program. | Wait for completion; inspect report when finished. |
+| `done ( ` | Plan completed execution (e.g. `done (deleted 12 file(s), 176.2 GB freed; 0 skipped; 0 failed, exit 0)`). | Review `%LOCALAPPDATA%\dirused\plans\<id>\report.txt`. |
+| `cancelled` | Plan was cancelled before running. | None; reschedule if needed. |
+| `expired` | Plan reached its 24-hour expiration time without running. | Reschedule with a fresh delete list. |
+| `missed (did not run)` | Scheduled time passed by more than 15 minutes without running (e.g. machine off or user logged off). | Reschedule the run. |
+| `task missing` | Plan folder exists, but the Windows Task Scheduler task is missing. | Reschedule or cancel the orphaned plan. |
+| `interrupted ( ` | Plan execution began but terminated unexpectedly without writing a report (e.g. `interrupted (started Mon 22:30 PST, no report) — check the list and the report folder`). | Check delete list, purge log, and plan folder to assess state. |
+| `permissions changed — not run` | Permissions or ownership on plan folder, parent folder, or copied files changed, or links were detected. | Fix folder permissions and reschedule. |
+| `unreadable plan` | `plan.txt` is missing, damaged, or invalid. | Remove the plan folder and recreate if desired. |
+| `refused: ` | Execution was refused by `/runplan` (e.g. `refused: not the scheduled time`). | Check the refusal table below for causes and remedies. |
+
+### `/schedule /cancel <id>`
+
+`dirused /schedule /cancel <id>` cancels a pending scheduled purge:
+- Writes a `cancel` record to the plan's `claim` file and unregisters the Task Scheduler task (`SchedulePlans.cs:75-95`).
+- A plan that has already started running cannot be cancelled (`<id> already started; it cannot be cancelled`).
+- If already cancelled, it reports that it is already cancelled.
+
+### `/schedule /trust ["acct"]` and `/schedule /untrust "acct"`
+
+What a trusted folder writer is and when you need one (`PlanTrust.cs`, `TrustCommands.cs`):
+To prevent privilege escalation or tampering, dirused validates the ACLs on `dirused.exe`, the plan folder root, and all ancestor directories up to the drive root. Scheduling is refused if any account other than the current user, SYSTEM, Administrators, TrustedInstaller, or CREATOR OWNER has write, append, delete, delete child, change permissions, take ownership, generic write, generic all, or owner rights.
+
+- Broad groups (such as Everyone, Authenticated Users, Users, Guests, and Domain Users) are too wide to trust and are always rejected (`is too wide to trust`).
+- If an intermediate folder has legitimate write permissions granted to a specific administrative or service account, trust it by name or SID: `dirused /schedule /trust "DOMAIN\account"`.
+- Run `dirused /schedule /trust` with no arguments to list all currently trusted accounts.
+- Run `dirused /schedule /untrust "acct"` to remove an account from the trust list.
+- Trust records are stored in `%LOCALAPPDATA%\dirused\trust.txt` restricted to the current user.
+
+### `/runplan <id>`
+
+`/runplan <id>` is started by the scheduled task, not by hand, and not listed in `/help`.
+
+Refusals:
+
+| Refusal | Cause | Remediation |
+|---|---|---|
+| `refused: not a plan id` | Argument does not match the plan ID pattern or plan directory does not exist. | Pass a valid plan ID. |
+| `refused: not started from the plan's program copy` | Process was not invoked from the copied `dirused.exe` in the plan directory. | Let Task Scheduler start the copied executable. |
+| `refused: plan folder contains a link` | Plan folder, parent folder, or copied file is a reparse point or link. | Remove links and reschedule. |
+| `refused: plan folder permissions changed` | Permissions or ownership of plan folder or its files were altered after creation. | Restore ACLs and reschedule. |
+| `refused: not a dirused plan` | `plan.txt` is unreadable, invalid, or corrupted. | Reschedule the purge. |
+| `refused: not the scheduled time` | Run attempted earlier than 1 minute before or later than 15 minutes after scheduled time. | Execute at scheduled time. |
+| `refused: plan already has a report` | `report.txt` already exists in plan folder. | Plan already completed. |
+| `refused: plan already started` | Another run instance already created a `claim` file. | Wait for active run to finish. |
+| `refused: program copy changed since it was scheduled` | SHA-256 hash of `dirused.exe` does not match hash stored in `plan.txt`. | Do not modify plan files; reschedule. |
+| `refused: list changed since it was scheduled` | SHA-256 hash of `list.txt` does not match hash stored in `plan.txt`. | Do not modify plan files; reschedule. |
+| `refused: error during run` | Unhandled exception encountered during purge run. | Inspect error details in `report.txt`. |
+| `refused:` followed by trust message (`... can be changed by ...`, `... is a link ...`, `cannot read permissions of ...`) | Untrusted account has write permissions on executable, plan root, or ancestors, or a link exists (`PlanRunner.cs:91-98`). | Trust the account via `/schedule /trust` or tighten directory ACLs. |
+
+Non-refusal results:
+- `cancelled`: Plan was cancelled before starting (exit 0).
+- `expired`: Plan reached 24 hours after creation without running.
+- `error: could not claim plan`: Unable to write `claim` file due to filesystem error (exit 3).
+
+Destination of results:
+- Written to `report.txt`: results returned through `Report` or `ReportOutcome` (`done`, `expired`, `refused: not a dirused plan`, trust check failures `refused: <trust>`, `refused: program copy changed since it was scheduled`, `refused: list changed since it was scheduled`, and `refused: error during run`).
+- Output only to stderr and purge log (`Refuse`): early check failures (`refused: not a plan id`, `refused: not started from the plan's program copy`, `refused: plan folder contains a link`, `refused: plan folder permissions changed`, `refused: not the scheduled time`, `refused: plan already has a report`, `refused: plan already started`, `cancelled`, and `error: could not claim plan`).
+
+### Report
+
+When a run finishes, the report is written to `%LOCALAPPDATA%\dirused\plans\<id>\report.txt`.
+
+Header fields:
+- `# id:`: the plan ID.
+- `# started:`: start timestamp in ISO format.
+- `# finished:`: completion timestamp in ISO format.
+- `# outcome:`: final outcome (e.g. `done`, `expired`, or refusal message).
+- `# exit:`: process exit code (`0`, `1`, or `3`).
+- `# result:`: summary of files deleted and space freed (written only when a run happened; `PlanRunner.cs:190-193`, e.g. `# result: deleted 12 file(s), 176.2 GB freed; 0 skipped; 0 failed`).
+
+The header is followed by the purge results table, held files summary (if applicable), `--- purge log`, and `--- stderr`.
+
+### Scheduling per node
+
+The target host comes from the list's UNC paths. A list naming more than one host is refused (`Schedule.cs:28`: `/schedule: the list covers more than one host (<hosts>); save one list per host and schedule each`).
+
+Save one list per server with `/savelist` and schedule each list separately.
+
+Worked example with two servers (`us03p02ffm01` and `us03p02ffm02`):
+
+```cmd
+:: 1. Scan and save delete list for host 1
+dirused \\us03p02ffm01\d$\logs /largest *.log /purge /savelist C:\lists\srv1.txt
+
+:: 2. Scan and save delete list for host 2
+dirused \\us03p02ffm02\d$\logs /largest *.log /purge /savelist C:\lists\srv2.txt
+
+:: 3. Schedule purge on host 1 for 22:30 PT
+dirused /fromlist C:\lists\srv1.txt /purge /schedule 22:30 PT /confirm /yes
+
+:: 4. Schedule purge on host 2 for 23:00 PT
+dirused /fromlist C:\lists\srv2.txt /purge /schedule 23:00 PT /confirm /yes
+```
+
+`/schedule /list` shows each plan's host:
+
+```text
+20261123-2300-b2c3  Mon 2026-11-23 23:00 PST  us03p02ffm02  scheduled   8 file(s) 112.5 GB  srv2.txt
+20261123-2230-a1b2  Mon 2026-11-23 22:30 PST  us03p02ffm01  scheduled  12 file(s) 176.2 GB  srv1.txt
+```
+
+### Known limits
+
+- A console window may flash at run time (`TaskXml.cs:203`) when Task Scheduler launches the interactive process.
+- Old plan folders are not cleaned up yet and remain under `%LOCALAPPDATA%\dirused\plans` until manually deleted.
 
 `dirused /purge` safely removes large, old files identified during directory scans or loaded from a previously reviewed delete list.
 

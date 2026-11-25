@@ -100,6 +100,10 @@ The help describes the switches this way:
 /fromlist <file>    Purge only rows in a saved list (requires /purge)
 /schedule <time>    With /fromlist /purge: preview a one-time run at HH:MM
                     [PT|PST|PDT|UTC]; add /confirm to schedule it
+/schedule /list     Show scheduled purges
+/schedule /cancel <id>  Cancel a scheduled purge
+/schedule /trust ["acct"]  Trust a folder writer (or list them)
+/schedule /untrust "acct"  Stop trusting one
 /confirm            With /purge: really delete. Deletes are permanent
                     (admin shares like \\host\d$ skip the Recycle Bin).
                     Each deletion is logged to C:\temp\dirused-purge.log
@@ -115,6 +119,10 @@ Purge examples:
       Dry run: also include listed .log files from 100MB
   dirused /file servers.txt /largest *.log;*.hprof /purge 7 /confirm
       On every server, delete listed .log and .hprof files older than 7 days
+  dirused /fromlist delete.txt /purge /schedule 22:30 PT
+      Preview a one-time run at 22:30 PT
+  dirused /fromlist delete.txt /purge /schedule 22:30 PT /confirm
+      Schedule the one-time run at 22:30 PT
 ```
 
 Purging with `/confirm` requires explicit file patterns; match-all patterns and `+` additions are refused, and when `/largest` is given more than once the last one counts. Without `/confirm`, `/largest /purge` with no patterns is a dry run over the default list. Sizes require KB, MB, GB, or TB units and use powers of 1024. A file is skipped when it is smaller than `/minsize`, outside the target, has an ambiguous trailing dot or space, has an unknown or recent modification time, no longer exists, is a directory or reparse point, is hard-linked, or changed since the scan. Locked or denied files are reported as failed, except Tomcat redirect logs which can be deleted by stopping Tomcat under `/confirm` (or `/yes` off-hours). Dry runs do not open files.
@@ -127,6 +135,13 @@ To preserve the exact reviewed set, add `/savelist <file>` to a dry run, for exa
 dirused \\server\d$\logs /largest *.log /purge /savelist delete.txt
 dirused /fromlist delete.txt /purge
 dirused /fromlist delete.txt /purge /confirm
+```
+
+To preview and schedule a one-time purge:
+
+```
+dirused /fromlist delete.txt /purge /schedule 22:30 PT
+dirused /fromlist delete.txt /purge /schedule 22:30 PT /confirm
 ```
 
 The UTF-8 delete list stores the target, NTFS volume serial, 64-bit file ID, size and full modified timestamp for each eligible file. You may remove lines before using it; only files whose identity and metadata still match are considered. The list’s saved age and minimum size are used. Bad or duplicate rows are skipped and reported; the command exits 3 when any are present. A file without a reported NTFS ID is not saved. `/fromlist` accepts `/confirm`, `/html`, `/output`, `/json` and `/csv` with `/purge`; it cannot be combined with scan targets or scan options.
