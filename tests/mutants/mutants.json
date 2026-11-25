@@ -40,5 +40,37 @@
     "file": "src/Dirused.Common/ScheduleWindows.cs",
     "find": "Task stdout = process.StandardOutput.BaseStream.CopyToAsync(output);",
     "replace": "process.StandardOutput.BaseStream.CopyTo(output); Task stdout = Task.CompletedTask;"
+  },
+  {
+    "id": "b3d-refusal-kept",
+    "proves": "B3d-M1",
+    "file": "src/Dirused.Cli/Program.cs",
+    "filter": "FullyQualifiedName~Dirused.Tests.ProgramScheduleTests",
+    "find": "            var seams = EffectiveSchedule();",
+    "replace": "            if (args.Length > 0) { error.WriteLine(\"/schedule is not available in this version\"); return 1; }\n            var seams = EffectiveSchedule();"
+  },
+  {
+    "id": "b3d-update-check-first",
+    "proves": "B3d-N2",
+    "file": "src/Dirused.Cli/Program.cs",
+    "filter": "FullyQualifiedName~Dirused.Tests.ProgramScheduleTests",
+    "find": "            var seams = EffectiveSchedule();",
+    "replace": "            var (mutCheck, mutChecker) = StartUpdateCheck(args, error, source, version, updateStatePath, false);\n            mutChecker?.WaitAfterReport(mutCheck, TimeSpan.FromSeconds(1));\n            var seams = EffectiveSchedule();"
+  },
+  {
+    "id": "b3d-cleanup-not-skipped",
+    "proves": "B3d-M4",
+    "file": "src/Dirused.Cli/Program.cs",
+    "filter": "FullyQualifiedName~Dirused.Tests.ProgramScheduleTests",
+    "find": "if (source != null && !scheduleArg) (cleanup ?? CleanupUpdateFiles)();",
+    "replace": "if (source != null) (cleanup ?? CleanupUpdateFiles)();"
+  },
+  {
+    "id": "b3d-iswindows-dropped",
+    "proves": "B3d-M2",
+    "file": "src/Dirused.Cli/Program.cs",
+    "filter": "FullyQualifiedName~Dirused.Tests.ProgramScheduleTests",
+    "find": "ScheduleSeams? EffectiveSchedule() => scheduleSeams ?? (windows ? WindowsSchedule.Create(version) : null);",
+    "replace": "ScheduleSeams? EffectiveSchedule() => scheduleSeams ?? WindowsSchedule.Create(version);"
   }
 ]

@@ -4,6 +4,8 @@ on:
     paths:
       - src/Dirused.Common/ScheduleWindows.cs
       - tests/Dirused.Tests/ScheduleWindowsTests.cs
+      - src/Dirused.Cli/Program.cs
+      - tests/Dirused.Tests/ProgramScheduleTests.cs
       - tests/mutants/**
       - .github/workflows/mutants.yml
   workflow_dispatch:
@@ -15,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        id: [control, subst-querydosdevice, movenew-overwrite, reparse-error-false, load-skip-acl, secure-unprotected, runner-sync-stdout]
+        id: [control, subst-querydosdevice, movenew-overwrite, reparse-error-false, load-skip-acl, secure-unprotected, runner-sync-stdout, b3d-refusal-kept, b3d-update-check-first, b3d-cleanup-not-skipped, b3d-iswindows-dropped]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
