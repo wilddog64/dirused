@@ -117,7 +117,34 @@ public sealed class RealTrustStore(string folder, IPlanFolderSecurity security, 
     private bool UserOnly(AclRead acl) => acl.Entries.Where(e=>e.Allow).All(e=>string.Equals(e.Sid,userSid,StringComparison.OrdinalIgnoreCase));
     private SeamResult Save(TrustedAccount[] items)
     {
-        try { string tmp=Path.Combine(folder,"trust.tmp"); if (File.Exists(tmp)) File.Delete(tmp); var created=new RealPlanStore(Path.Combine(folder,"unused")).WriteNew(tmp,new UTF8Encoding(false).GetBytes(string.Concat(items.Select(x=>x.Sid+"\t"+x.Display+"\n")))); if(!created.Ok)return created; File.Move(tmp,FilePath,true); return new(true); } catch(Exception ex){return new(false,ex.Message);}
+        string tmp=Path.Combine(folder,"trust.tmp");
+        try
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+            var created=new RealPlanStore(Path.Combine(folder,"unused")).WriteNew(tmp,new UTF8Encoding(false).GetBytes(string.Concat(items.Select(x=>x.Sid+"\t"+x.Display+"\n"))));
+            if(!created.Ok)return created;
+            try
+            {
+                var acl=security.ReadAcl(tmp);
+                if (!acl.Ok || !string.Equals(acl.OwnerSid,userSid,StringComparison.OrdinalIgnoreCase))
+                {
+                    var fs=new FileSecurity();
+                    fs.SetOwner(new SecurityIdentifier(userSid));
+                    new FileInfo(tmp).SetAccessControl(fs);
+                    acl=security.ReadAcl(tmp);
+                    if (!acl.Ok || !string.Equals(acl.OwnerSid,userSid,StringComparison.OrdinalIgnoreCase))
+                        throw new IOException(acl.Error ?? "trust.tmp owner does not match the current user");
+                }
+            }
+            catch(Exception ex)
+            {
+                try { File.Delete(tmp); } catch { }
+                return new(false,ex.Message);
+            }
+            File.Move(tmp,FilePath,true);
+            return new(true);
+        }
+        catch(Exception ex){return new(false,ex.Message);}
     }
     public SeamResult Add(TrustedAccount account) => Change(account.Sid,account,true);
     public SeamResult Remove(string sid) => Change(sid,null,false);
