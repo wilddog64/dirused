@@ -1,0 +1,26 @@
+name: mutants
+on:
+  push:
+    paths:
+      - src/Dirused.Common/ScheduleWindows.cs
+      - tests/Dirused.Tests/ScheduleWindowsTests.cs
+      - tests/mutants/**
+      - .github/workflows/mutants.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mutant:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        id: [control, subst-querydosdevice, movenew-overwrite, reparse-error-false, load-skip-acl, secure-unprotected, runner-sync-stdout]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: mutant ${{ matrix.id }}
+        shell: pwsh
+        run: ./tests/mutants/run-mutant.ps1 -Id '${{ matrix.id }}'

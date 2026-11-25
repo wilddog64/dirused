@@ -1,0 +1,44 @@
+[
+  {
+    "id": "subst-querydosdevice",
+    "proves": "B3c-N1",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "if (QueryDosDeviceW(drive[..2], target, (uint)target.Length) == 0 || new string(target).Split('\\0')[0].StartsWith(@\"\\??\\\", StringComparison.Ordinal)) return new(false,false,null,null,[],\"not on a local fixed drive\");",
+    "replace": "_ = QueryDosDeviceW(drive[..2], target, (uint)target.Length);"
+  },
+  {
+    "id": "movenew-overwrite",
+    "proves": "B3c-M4",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "File.Move(from, to, false);",
+    "replace": "File.Move(from, to, true);"
+  },
+  {
+    "id": "reparse-error-false",
+    "proves": "B3c-M3",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "catch (DirectoryNotFoundException) { return false; } catch { return true; } }",
+    "replace": "catch (DirectoryNotFoundException) { return false; } catch { return false; } }"
+  },
+  {
+    "id": "load-skip-acl",
+    "proves": "B3c-N2",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "|| !UserOnly(fa) || !UserOnly(ta)) return [];",
+    "replace": ") return [];"
+  },
+  {
+    "id": "secure-unprotected",
+    "proves": "B3c-M1",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "security.SetAccessRuleProtection(true,false);",
+    "replace": "security.SetAccessRuleProtection(false,true);"
+  },
+  {
+    "id": "runner-sync-stdout",
+    "proves": "B3c-M5",
+    "file": "src/Dirused.Common/ScheduleWindows.cs",
+    "find": "Task stdout = process.StandardOutput.BaseStream.CopyToAsync(output);",
+    "replace": "process.StandardOutput.BaseStream.CopyTo(output); Task stdout = Task.CompletedTask;"
+  }
+]
