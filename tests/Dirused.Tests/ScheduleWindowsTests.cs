@@ -58,7 +58,7 @@ public sealed class ScheduleWindowsTests
     [Fact] public void Store_IsReparsePoint_IdentifiesJunctionPlainAndMissingPaths()
     {
         string parent=Temp(), target=Path.Combine(parent,"target"), junction=Path.Combine(parent,"junction"), missing=Path.Combine(parent,"missing"); Directory.CreateDirectory(target);
-        try { var store=new RealPlanStore(Path.Combine(parent,"log")); Run("cmd.exe","/c","mklink","/J",junction,target); Assert.True(store.IsReparsePoint(junction)); Assert.False(store.IsReparsePoint(target)); Assert.False(store.IsReparsePoint(missing)); }
+        try { var store=new RealPlanStore(Path.Combine(parent,"log")); Run("cmd.exe","/c","mklink","/J",junction,target); Assert.True(store.IsReparsePoint(junction)); Assert.False(store.IsReparsePoint(target)); Assert.False(store.IsReparsePoint(missing)); Assert.True(store.IsReparsePoint(Path.Combine(parent,"bad\0name"))); }
         finally { if(Directory.Exists(junction))Directory.Delete(junction); Directory.Delete(parent,true); }
     }
     [Fact] public void Resolver_ResolvesSidAndRejectsUnknownNames()

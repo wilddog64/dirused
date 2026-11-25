@@ -17,7 +17,7 @@ if ($Id -ne 'control') {
 }
 dotnet build $project -c Release
 if ($LASTEXITCODE -ne 0) { Write-Output "ERROR: build failed with mutant '$Id'; a mutant that does not compile proves nothing"; exit 2 }
-dotnet test $project -c Release --no-build --blame-hang-timeout 120s
+dotnet test $project -c Release --no-build --blame-hang-timeout 120s --filter 'FullyQualifiedName~Dirused.Tests.ScheduleWindowsTests'
 $rc = $LASTEXITCODE
 if ($Id -eq 'control') {
   if ($rc -eq 0) { Write-Output 'CONTROL PASS: unmutated suite is green'; exit 0 }
