@@ -27,7 +27,7 @@ public sealed class ProgramScheduleTests
         var seams = rig.ProgramSeams();
 
         var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/confirm", "/yes" }, seams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         string id = Assert.Single(rig.Scheduler.Registered).Expected.Id;
         Assert.Contains("Scheduled " + id + " for ", result.Out);
         Assert.DoesNotContain("is not available in this version", result.Out + result.Err);
@@ -37,24 +37,24 @@ public sealed class ProgramScheduleTests
         var planSchedule = rig.Schedule with { ExePath = PlanRoot + "\\" + id + "\\dirused.exe" };
         var runSeams = rig.ProgramSeams() with { Schedule = planSchedule };
         result = Invoke(new[] { "/runplan", id }, runSeams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         Assert.StartsWith("run 2026-11-23T22:30:00-08:00 pid ", Encoding.UTF8.GetString(rig.Store.ReadAll(PlanRoot + "\\" + id + "\\claim")!));
 
         rig.Now = InitialNow;
         result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/confirm", "/yes" }, seams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         string secondId = rig.Scheduler.Registered.Last().Expected.Id;
         result = Invoke(new[] { "/schedule", "/list" }, seams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         Assert.Contains(secondId, result.Out);
         result = Invoke(new[] { "/schedule", "/cancel", secondId }, seams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         Assert.Equal($"Cancelled {secondId}.\n", result.Out);
         result = Invoke(new[] { "/schedule", "/trust" }, seams);
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         Assert.Equal("No trusted accounts.\n", result.Out);
         result = Invoke(new[] { "/schedule", "/untrust", "x" }, seams);
-        Assert.Equal(1, result.Code);
+        Assert.True(result.Code == 1, result.Err);
         Assert.Equal("x is not trusted.\n", result.Err);
         Assert.DoesNotContain("is not available in this version", result.Out + result.Err);
         Assert.Equal(0, rig.Release.Calls);
@@ -70,7 +70,7 @@ public sealed class ProgramScheduleTests
     {
         var seams = NoWindows();
         var result = Invoke(form.Split(' '), seams);
-        Assert.Equal(1, result.Code);
+        Assert.True(result.Code == 1, result.Err);
         Assert.Empty(result.Out);
         Assert.Equal("/schedule needs Windows\n", result.Err);
     }
@@ -83,12 +83,12 @@ public sealed class ProgramScheduleTests
         File.WriteAllBytes(listPath, MakeList());
         var seams = NoWindows();
         var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/confirm" }, seams);
-        Assert.Equal(1, result.Code);
+        Assert.True(result.Code == 1, result.Err);
         Assert.Empty(result.Out);
         Assert.Equal("/schedule needs Windows\n", result.Err);
 
-        result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30" }, seams);
-        Assert.Equal(0, result.Code);
+        result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "PT" }, seams);
+        Assert.True(result.Code == 0, result.Err);
         Assert.Contains("Scheduled purge preview", result.Out);
         Assert.Contains("Preview only. Add /confirm to schedule it.", result.Out);
     }
@@ -102,7 +102,20 @@ public sealed class ProgramScheduleTests
         var rig = new Rig(temp.PathFor("purge.log"));
         var seams = rig.ProgramSeams() with { PurgeLogPath = listPath };
         var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/confirm", "/yes" }, seams);
-        Assert.Equal(1, result.Code);
+        Assert.True(result.Code == 1, result.Err);
+        Assert.Equal("/fromlist cannot be the purge log\n", result.Err);
+        Assert.Empty(rig.Scheduler.Registered);
+    }
+
+    [Fact]
+    public void FromListCannotBeOutputKeepsExistingRefusal()
+    {
+        using var temp = new TempDir();
+        string listPath = temp.PathFor("list.txt");
+        File.WriteAllBytes(listPath, MakeList());
+        var rig = new Rig(temp.PathFor("purge.log"));
+        var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/output", listPath }, rig.ProgramSeams());
+        Assert.True(result.Code == 1, result.Err);
         Assert.Equal("/fromlist cannot be the output or purge log\n", result.Err);
         Assert.Empty(rig.Scheduler.Registered);
     }
@@ -128,7 +141,7 @@ public sealed class ProgramScheduleTests
         int versionCleanupCalls = 0;
         var positive = new Rig(temp.PathFor("version-purge.log"));
         var result = Invoke(new[] { "/version" }, positive.ProgramSeams(cleanup: () => versionCleanupCalls++));
-        Assert.Equal(0, result.Code);
+        Assert.True(result.Code == 0, result.Err);
         Assert.Equal(1, versionCleanupCalls);
     }
 
@@ -141,7 +154,7 @@ public sealed class ProgramScheduleTests
         var rig = new Rig(temp.PathFor("purge.log"), held: true);
         var seams = rig.ProgramSeams();
         var scheduled = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/confirm", "/yes" }, seams);
-        Assert.Equal(0, scheduled.Code);
+        Assert.True(scheduled.Code == 0, scheduled.Err);
         string id = Assert.Single(rig.Scheduler.Registered).Expected.Id;
         rig.Now = RunNow;
         var planSeams = rig.ProgramSeams() with { Schedule = rig.Schedule with { ExePath = PlanRoot + "\\" + id + "\\dirused.exe" } };
@@ -273,12 +286,13 @@ public sealed class ProgramScheduleTests
     private sealed class HeldFs : IPurgeFileSystem
     {
         private bool held;
+        private bool deleted;
         public Action? OnStop, OnStart;
         public HeldFs(bool initial) => held = initial;
         public void SetHeld(bool value) => held = value;
         private static PurgeFileInfo Info => new(FilePath, 400, OldWrite, false, false, 1) { VolumeSerial = 0x12345678, FileIndex = 0x2000000000000001 };
         public string? ResolveRoot(string path, out string? error) { error = null; return path; }
-        public PurgeOpen Open(string path) => held ? new PurgeOpen("sharing violation", errorCode: 32) : new PurgeOpen(Info, new Disposable(), () => { });
+        public PurgeOpen Open(string path) => held ? new PurgeOpen("sharing violation", errorCode: 32) : deleted ? new PurgeOpen("not found", notFound: true) : new PurgeOpen(Info, new Disposable(), () => deleted = true, () => deleted = false);
         public PurgeFileInfo? Stat(string path, out string? error, out bool notFound) { error = null; notFound = false; return Info; }
         public bool? ProbeHeld(string path, out string? error) { error = null; return held; }
         private sealed class Disposable : IDisposable { public void Dispose() { } }
