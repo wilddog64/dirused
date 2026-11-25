@@ -114,7 +114,7 @@ public sealed class ProgramScheduleTests
         string listPath = temp.PathFor("list.txt");
         File.WriteAllBytes(listPath, MakeList());
         var rig = new Rig(temp.PathFor("purge.log"));
-        var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/schedule", "22:30", "/output", listPath }, rig.ProgramSeams());
+        var result = Invoke(new[] { "/fromlist", listPath, "/purge", "/output", listPath }, rig.ProgramSeams());
         Assert.True(result.Code == 1, result.Err);
         Assert.Equal("/fromlist cannot be the output or purge log\n", result.Err);
         Assert.Empty(rig.Scheduler.Registered);
